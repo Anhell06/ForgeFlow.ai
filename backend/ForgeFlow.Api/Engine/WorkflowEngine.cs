@@ -21,6 +21,7 @@ public class WorkflowEngine(
     ProviderRegistry providers,
     IHttpClientFactory httpFactory,
     IServiceProvider services,
+    NodeCacheService cache,
     IOptions<ForgeOptions> opt,
     ILogger<WorkflowEngine> log)
 {
@@ -32,6 +33,8 @@ public class WorkflowEngine(
         public required WorkflowGraph Graph;
         public required Dictionary<string, NodeState> States;
         public required JsonObject Inputs;
+        /// <summary>Nodes that must execute even when a cached result exists.</summary>
+        public required HashSet<string> Force;
         public readonly object Lock = new();
     }
 
@@ -48,6 +51,7 @@ public class WorkflowEngine(
             Graph = Json.De<WorkflowGraph>(run.Graph),
             States = Json.De<Dictionary<string, NodeState>>(run.NodeStates),
             Inputs = Json.ParseObject(run.Inputs),
+            Force = Json.ParseArray(run.ForceNodes).Select(x => Json.AsText(x)).ToHashSet(),
         };
         foreach (var n in rc.Graph.Nodes) rc.States.TryAdd(n.Id, new NodeState());
         // Defaults of input nodes are visible as {{workflow.name}} everywhere, not only when passed explicitly.
@@ -150,9 +154,28 @@ public class WorkflowEngine(
             st.Status = "running";
             st.StartedAt = DateTime.UtcNow;
             st.Error = null;
+            st.Cached = false;
             Publish(rc, def.Id, st);
 
             var inputs = GatherInputs(rc, def, type!.Spec, out var listSourced);
+
+            // Same settings and same input values as an earlier run of this pipeline → reuse that result.
+            string? cacheKey = null;
+            if (rc.Run.WorkflowId is { } workflowId && NodeCacheService.IsCacheable(def))
+            {
+                cacheKey = NodeCacheService.Fingerprint(def, inputs, rc.Inputs);
+                if (!rc.Force.Contains(def.Id) && await cache.GetAsync(workflowId, def.Id, cacheKey, ct) is { } hit)
+                {
+                    st.Outputs = hit;
+                    st.Status = "succeeded";
+                    st.Cached = true;
+                    st.Progress = 1;
+                    st.Message = null;
+                    AddLog(rc, def.Id, "Reused cached result (same settings and inputs)");
+                    return;
+                }
+            }
+
             // Single-value ports fan out over a list. "any" ports only do so when the list really is a list output,
             // so a JSON array meant as one value is not split by accident; "json" ports never do.
             var mapPorts = type.Spec.Inputs
@@ -172,6 +195,7 @@ public class WorkflowEngine(
             st.Outputs = outputs;
             st.Status = "succeeded";
             st.Progress = 1;
+            if (cacheKey is not null) await cache.StoreAsync(rc.Run.WorkflowId!, def.Id, cacheKey, outputs, CancellationToken.None);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

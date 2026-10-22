@@ -23,6 +23,7 @@ builder.Services.AddSingleton<ProviderRegistry>();
 builder.Services.AddSingleton<NodeRegistry>();
 builder.Services.AddSingleton<TemplateLibrary>();
 builder.Services.AddSingleton<RunEvents>();
+builder.Services.AddSingleton<NodeCacheService>();
 builder.Services.AddSingleton<WorkflowEngine>();
 builder.Services.AddSingleton<RunService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RunService>());
@@ -42,6 +43,7 @@ await using (var scope = app.Services.CreateAsyncScope())
 {
     var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDb>>().CreateDbContextAsync();
     await db.Database.EnsureCreatedAsync();
+    await db.UpgradeSchemaAsync();
     await ProviderRegistry.SeedAsync(db);
 }
 

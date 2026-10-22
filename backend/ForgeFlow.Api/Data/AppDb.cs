@@ -11,6 +11,30 @@ public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
     public DbSet<McpServerEntity> McpServers => Set<McpServerEntity>();
     public DbSet<WorkflowEntity> Workflows => Set<WorkflowEntity>();
     public DbSet<RunEntity> Runs => Set<RunEntity>();
+    public DbSet<NodeCacheEntity> NodeCache => Set<NodeCacheEntity>();
+
+    /// <summary>
+    /// EnsureCreated only creates a fresh database, so tables/columns added later are created here for existing ones.
+    /// </summary>
+    public async Task UpgradeSchemaAsync()
+    {
+        await Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "NodeCache" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_NodeCache" PRIMARY KEY,
+                "WorkflowId" TEXT NOT NULL,
+                "NodeId" TEXT NOT NULL,
+                "Key" TEXT NOT NULL,
+                "Outputs" TEXT NOT NULL,
+                "CreatedAt" TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS "IX_NodeCache_WorkflowId_NodeId" ON "NodeCache" ("WorkflowId", "NodeId");
+            """);
+        var conn = Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Runs') WHERE name = 'ForceNodes'";
+        if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+            await Database.ExecuteSqlRawAsync("""ALTER TABLE "Runs" ADD COLUMN "ForceNodes" TEXT NOT NULL DEFAULT '[]'""");
+    }
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -18,6 +42,7 @@ public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
         b.Entity<AssetEntity>().HasIndex(a => a.RunId);
         b.Entity<RunEntity>().HasIndex(r => r.CreatedAt);
         b.Entity<RunEntity>().HasIndex(r => r.WorkflowId);
+        b.Entity<NodeCacheEntity>().ToTable("NodeCache").HasIndex(c => new { c.WorkflowId, c.NodeId });
 
         // SQLite stores no DateTimeKind; mark values as UTC so the API serializes them with a "Z".
         var utc = new ValueConverter<DateTime, DateTime>(v => v, v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
@@ -106,7 +131,22 @@ public class RunEntity
     public string Outputs { get; set; } = "{}";
     public string? Error { get; set; }
     public string? ParentRunId { get; set; }
+    /// <summary>JSON array of node ids that must execute even if a cached result exists (rerun from a node).</summary>
+    public string ForceNodes { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? StartedAt { get; set; }
     public DateTime? FinishedAt { get; set; }
+}
+
+/// <summary>
+/// A node's outputs for one exact set of inputs and settings (Key = fingerprint), reused by later runs of the pipeline.
+/// </summary>
+public class NodeCacheEntity
+{
+    [Key] public string Id { get; set; } = Ids.New("nc");
+    public string WorkflowId { get; set; } = "";
+    public string NodeId { get; set; } = "";
+    public string Key { get; set; } = "";
+    public string Outputs { get; set; } = "{}";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -14,6 +14,8 @@ export interface NodeSpec {
 export interface NodeDef {
   id: string; type: string; title?: string; params: Record<string, unknown>;
   position?: { x: number; y: number }; width?: number; height?: number; retries?: number; mapConcurrency?: number; disabled?: boolean;
+  /** Reuse the result when settings and inputs are unchanged; undefined means on. */
+  cache?: boolean;
 }
 export interface EdgeDef { id: string; source: string; sourcePort: string; target: string; targetPort: string }
 export interface Graph { nodes: NodeDef[]; edges: EdgeDef[] }
@@ -92,6 +94,8 @@ export const api = {
   saveWorkflow: (id: string, w: { name?: string; description?: string; graph?: Graph }) => request<Workflow>("PUT", `/api/workflows/${id}`, w),
   deleteWorkflow: (id: string) => request<void>("DELETE", `/api/workflows/${id}`),
   duplicateWorkflow: (id: string) => request<Workflow>("POST", `/api/workflows/${id}/duplicate`),
+  /** Clears cached results of the nodes and everything downstream of them; no ids = the whole pipeline. */
+  clearCache: (id: string, nodeIds?: string[]) => request<{ nodes: string[]; rows: number }>("POST", `/api/workflows/${id}/cache/clear`, { nodeIds }),
   runWorkflow: (id: string, inputs: Record<string, unknown>) => request<Run>("POST", `/api/workflows/${id}/run`, { inputs }),
 
   runs: (workflowId?: string, limit = 50) => request<Run[]>("GET", `/api/runs?limit=${limit}${workflowId ? `&workflowId=${workflowId}` : ""}`),
@@ -152,6 +156,9 @@ export function compatible(from: string, to: string): boolean {
   if (from === "file") return ["image", "video", "model", "audio"].includes(to);
   return false;
 }
+
+/** Mirrors the backend: input and output nodes are never cached. */
+export const cacheable = (type: string) => !type.startsWith("input.") && !type.startsWith("output.");
 
 export function formatDuration(start?: string, end?: string): string {
   if (!start) return "";

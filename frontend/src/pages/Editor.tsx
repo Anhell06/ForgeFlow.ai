@@ -5,7 +5,7 @@ import {
   type Connection, type Edge, type IsValidConnection, type OnConnectEnd,
 } from "@xyflow/react";
 import {
-  api, compatible, formatDuration, subscribe, type Graph, type McpServer, type NodeDef, type NodeSpec, type NodeState, type Provider, type Run,
+  api, cacheable, compatible, formatDuration, subscribe, type Graph, type McpServer, type NodeDef, type NodeSpec, type NodeState, type Provider, type Run,
 } from "../api";
 import { EditorActions, FlowNode, type ForgeNode, type PreviewHint } from "../components/FlowNode";
 import { ParamField } from "../components/ParamField";
@@ -351,6 +351,20 @@ function EditorInner() {
     } catch (e) { toastError(e); }
   };
 
+  /**
+   * Forgets cached results of a node and everything that depends on it (or of the whole pipeline),
+   * so the next run executes them again. Their shown results are cleared too.
+   */
+  const clearCache = async (nodeId?: string) => {
+    if (!(await save())) return;
+    try {
+      const r = await api.clearCache(id, nodeId ? [nodeId] : undefined);
+      const cleared = new Set(r.nodes);
+      setStates((s) => Object.fromEntries(Object.entries(s).filter(([k]) => !cleared.has(k))));
+      toast(t("editor.cleared", { n: r.nodes.length }));
+    } catch (e) { toastError(e); }
+  };
+
   /** Rewires a preview from e.g. "image" to "images" and recomputes just the preview (nothing is regenerated). */
   const showAll = (previewId: string, hint: PreviewHint) => {
     record();
@@ -477,6 +491,8 @@ function EditorInner() {
             <p className="help">{t("editor.helpTemplates")} <code>{"{{inputs.port}}"}</code>, <code>{"{{workflow.inputName}}"}</code>,
               {" "}{t("editor.helpFilters")} <code>| escape</code> (JSON), <code>| datauri</code>, <code>| path</code>, <code>| join:", "</code>.</p>
             <p className="help">{t("editor.helpFanout")}</p>
+            <p className="help">{t("editor.helpCache")}</p>
+            <button className="small" onClick={() => { if (confirm(t("editor.confirmClearAll"))) void clearCache(); }}>{t("editor.clearAll")}</button>
             {run?.error && <><h3 style={{ marginTop: 16 }}>{t("editor.lastError")}</h3><pre style={{ color: "var(--err)" }}>{run.error}</pre></>}
             {run && Object.keys(run.outputs ?? {}).length > 0 && (
               <>
@@ -493,6 +509,16 @@ function EditorInner() {
               {selectedState && <Status status={selectedState.cached ? "succeeded" : selectedState.status} label={selectedState.cached ? t("status.cached") : undefined} />}
             </div>
             <p className="help">{selectedSpec.description}</p>
+            {cacheable(selected.data.def.type) && (
+              <div className="cache-box">
+                <label className="row grow" title={t("editor.useCacheHint")}>
+                  <input type="checkbox" checked={selected.data.def.cache !== false}
+                    onChange={(e) => updateDef(selected.id, "cache", (d) => ({ ...d, cache: e.target.checked ? undefined : false }))} />
+                  <span>{t("editor.useCache")}</span>
+                </label>
+                <button className="small" onClick={() => void clearCache(selected.id)} title={t("editor.clearNodeHint")}>{t("editor.clearNode")}</button>
+              </div>
+            )}
             <div className="tabs">
               {(["params", "output", "logs"] as const).map((k) => (
                 <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>

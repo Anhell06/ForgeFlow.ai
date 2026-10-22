@@ -17,7 +17,8 @@ public class RunService(IDbContextFactory<AppDb> dbf, RunEvents events, IService
     readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _waiters = new();
 
     public async Task<RunEntity> CreateAsync(WorkflowGraph graph, JsonObject inputs, string name, string? workflowId,
-        Dictionary<string, NodeState>? reuse = null, string? parentRunId = null, CancellationToken ct = default)
+        Dictionary<string, NodeState>? reuse = null, string? parentRunId = null, CancellationToken ct = default,
+        IEnumerable<string>? force = null)
     {
         graph.TopologicalOrder(); // validate early: cycles and dangling edges
         var states = graph.Nodes.ToDictionary(n => n.Id, n => reuse is not null && reuse.TryGetValue(n.Id, out var s) ? s : new NodeState());
@@ -29,6 +30,7 @@ public class RunService(IDbContextFactory<AppDb> dbf, RunEvents events, IService
             Graph = Json.Ser(graph),
             NodeStates = Json.Ser(states),
             ParentRunId = parentRunId,
+            ForceNodes = Json.Ser(force?.ToArray() ?? []),
         };
         await using (var db = await dbf.CreateDbContextAsync(ct))
         {
@@ -54,10 +56,11 @@ public class RunService(IDbContextFactory<AppDb> dbf, RunEvents events, IService
         var oldGraph = Json.De<WorkflowGraph>(old.Graph);
         var graph = graphOverride ?? oldGraph;
         Dictionary<string, NodeState>? reuse = null;
+        HashSet<string>? dirty = null;
         if (!string.IsNullOrEmpty(fromNodeId))
         {
             if (graph.Node(fromNodeId) is null) throw new KeyNotFoundException($"Node {fromNodeId} not in run");
-            var dirty = graph.DownstreamOf(fromNodeId);
+            dirty = graph.DownstreamOf(fromNodeId);
             var oldStates = Json.De<Dictionary<string, NodeState>>(old.NodeStates);
             var reusable = new HashSet<string>();
             foreach (var id in graph.TopologicalOrder())
@@ -73,7 +76,8 @@ public class RunService(IDbContextFactory<AppDb> dbf, RunEvents events, IService
             });
         }
         var inputs = inputsOverride ?? Json.ParseObject(old.Inputs);
-        return await CreateAsync(graph, inputs, old.Name, old.WorkflowId, reuse, runId, ct);
+        // "Rerun from here" means: really execute this node and what follows, even if their cache would match.
+        return await CreateAsync(graph, inputs, old.Name, old.WorkflowId, reuse, runId, ct, force: dirty);
     }
 
     /// <summary>Same type, settings and incoming connections in both graphs.</summary>

@@ -111,6 +111,81 @@ public class AgentTests(ForgeFactory factory)
         Assert.Equal(calls + 1, llm.ImageCalls);
     }
 
+    [Fact]
+    public async Task NodeCacheSkipsUnchangedGenerations()
+    {
+        await using var llm = await FakeLlm.StartAsync();
+        var provider = await (await _http.PostAsJsonAsync("/api/providers", new { name = "fake-cache", type = "openai", baseUrl = llm.BaseUrl, apiKey = "x" }))
+            .Content.ReadFromJsonAsync<JsonObject>();
+        var pid = provider!["id"]!.GetValue<string>();
+        object Graph(string prompt, bool? cache = null) => new
+        {
+            nodes = new object[]
+            {
+                new { id = "txt", type = "input.text", @params = new { name = "prompt", value = prompt } },
+                new { id = "gen", type = "image.generate", cache, @params = new { provider = pid, count = 1 } },
+                new { id = "mock", type = "debug.mock", @params = new { kind = "text", delayMs = 10 } },
+                new { id = "view", type = "output.preview", @params = new { } },
+            },
+            edges = new[]
+            {
+                new { id = "e1", source = "txt", sourcePort = "text", target = "gen", targetPort = "prompt" },
+                new { id = "e2", source = "gen", sourcePort = "image", target = "mock", targetPort = "in" },
+                new { id = "e3", source = "mock", sourcePort = "out", target = "view", targetPort = "value" },
+            },
+        };
+        var wf = await (await _http.PostAsJsonAsync("/api/workflows", new { name = "cache test", graph = Graph("cat") })).Content.ReadFromJsonAsync<JsonObject>();
+        var wid = wf!["id"]!.GetValue<string>();
+        async Task<JsonObject> Run() => (await (await _http.PostAsJsonAsync($"/api/workflows/{wid}/run", new { wait = true })).Content.ReadFromJsonAsync<JsonObject>())!;
+        static bool Cached(JsonObject run, string node) => run["nodes"]![node]!["cached"]!.GetValue<bool>();
+        async Task Save(object graph) => await _http.PutAsJsonAsync($"/api/workflows/{wid}", new { graph });
+
+        var r1 = await Run();
+        Assert.Equal("succeeded", r1["status"]!.GetValue<string>());
+        Assert.Equal(1, llm.ImageCalls);
+
+        // Plain run again: nothing changed, nothing is generated.
+        var r2 = await Run();
+        Assert.True(Cached(r2, "gen") && Cached(r2, "mock"));
+        Assert.Equal(1, llm.ImageCalls);
+
+        // A new prompt changes the generator's inputs; downstream follows because its input changed too.
+        await Save(Graph("dog"));
+        var r3 = await Run();
+        Assert.False(Cached(r3, "gen"));
+        Assert.False(Cached(r3, "mock"));
+        Assert.Equal(2, llm.ImageCalls);
+
+        // Cache switched off for the generator: it runs every time.
+        await Save(Graph("dog", cache: false));
+        var r4 = await Run();
+        Assert.False(Cached(r4, "gen"));
+        Assert.Equal(3, llm.ImageCalls);
+
+        // Back on, then "Clear node" on the generator also clears what depends on it.
+        await Save(Graph("dog"));
+        Assert.True(Cached(await Run(), "gen")); // the "dog" result from r3 is still cached
+        var cleared = await (await _http.PostAsJsonAsync($"/api/workflows/{wid}/cache/clear", new { nodeIds = new[] { "gen" } })).Content.ReadFromJsonAsync<JsonObject>();
+        var clearedIds = cleared!["nodes"]!.AsArray().Select(x => x!.GetValue<string>()).ToHashSet();
+        Assert.Contains("gen", clearedIds);
+        Assert.Contains("mock", clearedIds);
+        Assert.DoesNotContain("txt", clearedIds);
+        var r6 = await Run();
+        Assert.False(Cached(r6, "gen"));
+        Assert.Equal(4, llm.ImageCalls);
+
+        // "Rerun from node" executes that node even though its cache matches.
+        var rerun = await (await _http.PostAsJsonAsync($"/api/runs/{r6["id"]}/rerun", new { fromNodeId = "gen" })).Content.ReadFromJsonAsync<JsonObject>();
+        JsonObject? done = null;
+        for (var i = 0; i < 100 && done?["status"]?.GetValue<string>() is not ("succeeded" or "failed"); i++)
+        {
+            await Task.Delay(100);
+            done = await _http.GetFromJsonAsync<JsonObject>($"/api/runs/{rerun!["id"]}");
+        }
+        Assert.Equal("succeeded", done!["status"]!.GetValue<string>());
+        Assert.Equal(5, llm.ImageCalls);
+    }
+
     async Task<string> FindMcp(string name)
     {
         var list = await _http.GetFromJsonAsync<JsonArray>("/api/mcp-servers");

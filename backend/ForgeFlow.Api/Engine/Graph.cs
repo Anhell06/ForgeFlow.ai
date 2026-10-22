@@ -65,6 +65,8 @@ public class NodeDef
     /// <summary>How many list items run at once when the node fans out over a list.</summary>
     public int MapConcurrency { get; set; } = 2;
     public bool Disabled { get; set; }
+    /// <summary>Reuse the result when settings and inputs are unchanged. Null means on.</summary>
+    public bool? Cache { get; set; }
 }
 
 public class NodePosition

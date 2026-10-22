@@ -16,6 +16,7 @@ public record AdhocRunRequest(WorkflowGraph Graph, JsonObject? Inputs, string? N
 public record NodeRunRequest(JsonObject? Inputs, JsonObject? Params, bool Wait = false, int WaitSeconds = 300);
 public record RerunRequest(string? FromNodeId, JsonObject? Inputs, WorkflowGraph? Graph);
 public record WorkflowDto(string? Name, string? Description, WorkflowGraph? Graph);
+public record CacheClearRequest(string[]? NodeIds);
 
 public static class Endpoints
 {
@@ -173,10 +174,29 @@ public static class Endpoints
             await db.SaveChangesAsync(ct);
             return Results.Ok(WorkflowView(w, true));
         });
-        api.MapDelete("/workflows/{id}", async (string id, IDbContextFactory<AppDb> dbf, CancellationToken ct) =>
+        api.MapDelete("/workflows/{id}", async (string id, IDbContextFactory<AppDb> dbf, NodeCacheService cache, CancellationToken ct) =>
         {
             await using var db = await dbf.CreateDbContextAsync(ct);
-            return await db.Workflows.Where(w => w.Id == id).ExecuteDeleteAsync(ct) > 0 ? Results.NoContent() : Results.NotFound();
+            if (await db.Workflows.Where(w => w.Id == id).ExecuteDeleteAsync(ct) == 0) return Results.NotFound();
+            await cache.ClearAsync(id, null, ct);
+            return Results.NoContent();
+        });
+        // Clears cached results of nodes and of everything that depends on them; without nodeIds, the whole pipeline.
+        api.MapPost("/workflows/{id}/cache/clear", async (string id, CacheClearRequest? req, IDbContextFactory<AppDb> dbf, NodeCacheService cache,
+            CancellationToken ct) =>
+        {
+            WorkflowEntity? w;
+            await using (var db = await dbf.CreateDbContextAsync(ct)) w = await db.Workflows.FindAsync([id], ct);
+            if (w is null) return Results.NotFound();
+            var graph = Json.De<WorkflowGraph>(w.Graph);
+            HashSet<string>? nodes = null;
+            if (req?.NodeIds is { Length: > 0 } ids)
+            {
+                nodes = [];
+                foreach (var n in ids.Where(n => graph.Node(n) is not null)) nodes.UnionWith(graph.DownstreamOf(n));
+            }
+            var rows = await cache.ClearAsync(id, nodes, ct);
+            return Results.Ok(new { nodes = nodes?.ToArray() ?? graph.Nodes.Select(n => n.Id).ToArray(), rows });
         });
         api.MapPost("/workflows/{id}/duplicate", async (string id, IDbContextFactory<AppDb> dbf, CancellationToken ct) =>
         {

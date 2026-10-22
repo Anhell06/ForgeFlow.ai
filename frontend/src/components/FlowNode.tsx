@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type DragEvent } from "react";
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from "@xyflow/react";
-import { api, isAsset, kindColor, type Asset, type NodeDef, type NodeSpec, type NodeState } from "../api";
+import { api, cacheable, isAsset, kindColor, type Asset, type NodeDef, type NodeSpec, type NodeState } from "../api";
 import { toastError } from "./Toast";
 import { CanvasPreview, fileUrl, ValueView } from "./Preview";
 import { Modal } from "./ui";
@@ -104,6 +104,7 @@ function StandardNode({ data, selected }: NodeProps<ForgeNode>) {
           <div className="fnode-title">{def.title || spec?.title || def.type}</div>
           <div className="fnode-type">{def.type}</div>
         </div>
+        {def.cache === false && cacheable(def.type) && <span className="tag" title={t("editor.useCacheHint")} style={{ fontSize: 10 }}>{t("node.noCache")}</span>}
         {status && status !== "pending" && <span className={`badge s-${status}`} style={{ padding: "1px 6px", fontSize: 10.5 }}>{t((state?.cached ? "status.cached" : `status.${status}`) as MsgKey)}</span>}
       </div>
       <div className="fnode-ports">
