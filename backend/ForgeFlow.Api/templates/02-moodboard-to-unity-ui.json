@@ -1,0 +1,56 @@
+{
+  "id": "moodboard-to-unity-ui",
+  "name": "Prompt → moodboard → Unity UI with 9-slice (Claude Code)",
+  "description": "An LLM writes moodboard shots, images are generated per shot and laid out as a moodboard. A UI kit sheet in the same style is generated, auto-sliced into elements with estimated 9-slice borders, and local Claude Code imports everything into your Unity project: sprites with borders, sliced Image prefabs and a demo canvas.",
+  "tags": ["2d", "ui", "unity", "claude-code", "9-slice"],
+  "graph": {
+    "nodes": [
+      { "id": "prompt", "type": "input.text", "title": "Style prompt", "position": { "x": 0, "y": 120 },
+        "params": { "name": "prompt", "value": "cozy dark-fantasy RPG, carved wood and brass, warm candle light" } },
+      { "id": "project", "type": "input.text", "title": "Unity project folder", "position": { "x": 0, "y": 420 },
+        "params": { "name": "unityProject", "value": "D:/Unity/MyGame" } },
+      { "id": "shots", "type": "llm.chat", "title": "Moodboard shots (LLM)", "position": { "x": 340, "y": 0 },
+        "params": {
+          "provider": "OpenAI", "format": "list",
+          "system": "You are an art director for game UI.",
+          "prompt": "Write 4 short image prompts for a moodboard that defines the visual style of a game UI: {{inputs.prompt}}. Mix: a key art scene, a material/texture close-up, a color palette swatch board, and an example HUD screen."
+        } },
+      { "id": "shot_images", "type": "image.generate", "title": "Moodboard images (per shot)", "position": { "x": 700, "y": 0 },
+        "mapConcurrency": 2,
+        "params": { "provider": "OpenAI", "model": "gpt-image-1", "size": "1024x1024", "prompt": "{{inputs.prompt}}" } },
+      { "id": "board", "type": "image.collage", "title": "Moodboard", "position": { "x": 1060, "y": 0 },
+        "params": { "columns": 2, "cell": 768, "gap": 24, "background": "#141414" } },
+      { "id": "kit", "type": "image.generate", "title": "UI kit sheet", "position": { "x": 700, "y": 260 },
+        "params": {
+          "provider": "OpenAI", "model": "gpt-image-1", "size": "1536x1024",
+          "prompt": "Game UI kit sprite sheet in this style: {{inputs.prompt}}. Separate, non-overlapping elements on a perfectly flat pure white background with generous spacing: 3 buttons (normal, hover, pressed), a large panel frame, a small window frame, a progress bar frame, a tab, a slider knob, 4 round icon slots. Flat orthographic view, no text, no shadows on the background."
+        } },
+      { "id": "slice", "type": "image.slice", "title": "Slice elements + 9-slice", "position": { "x": 1060, "y": 260 },
+        "params": { "mode": "auto", "tolerance": 28, "minSize": 32, "padding": 2, "transparent": true } },
+      { "id": "unity", "type": "agent.cli", "title": "Claude Code → Unity", "position": { "x": 1420, "y": 200 },
+        "params": {
+          "preset": "claude-code", "workdir": "{{workflow.unityProject}}", "timeoutMin": 40,
+          "collect": "Assets/UI/Generated/**/*\nAssets/Scenes/GeneratedUIDemo.unity",
+          "prompt": "You are working in a Unity project. Integrate a generated UI kit:\n1. Copy every slice image listed in the context into Assets/UI/Generated/Sprites/ (keep file names). Copy the moodboard image to Assets/UI/Generated/moodboard.png.\n2. For each sprite create/modify its .meta so the importer uses Texture Type: Sprite (2D and UI), Sprite Mode: Single, Mesh Type: Full Rect, alphaIsTransparency: 1, and set spriteBorder (x=left, y=bottom, z=right, w=top) from the slice data below. Skip borders when 'stretchable' is false.\n3. Create prefabs in Assets/UI/Generated/Prefabs/: one UI Image prefab per element with Image Type = Sliced for stretchable sprites, Simple otherwise. Name them by what they look like (Button_Normal, Panel_Large, ...) — look at the images.\n4. Create Assets/Scenes/GeneratedUIDemo.unity with a Canvas (Scale With Screen Size 1920x1080) that lays the prefabs out as a sample menu matching the moodboard mood.\n5. If Unity is open with an MCP bridge, refresh assets; otherwise it is fine to only write files. Summarize what you created.\n\nSlice data (JSON):\n{{inputs.context | json}}"
+        } },
+      { "id": "board_out", "type": "output.result", "title": "Moodboard", "position": { "x": 1420, "y": -40 }, "params": { "name": "moodboard" } },
+      { "id": "slices_out", "type": "output.result", "title": "UI elements", "position": { "x": 1420, "y": 480 }, "params": { "name": "ui_elements" } },
+      { "id": "unity_out", "type": "output.result", "title": "Unity report", "position": { "x": 1780, "y": 200 }, "params": { "name": "unity_report" } }
+    ],
+    "edges": [
+      { "id": "e1", "source": "prompt", "sourcePort": "text", "target": "shots", "targetPort": "prompt" },
+      { "id": "e2", "source": "shots", "sourcePort": "items", "target": "shot_images", "targetPort": "prompt" },
+      { "id": "e3", "source": "shot_images", "sourcePort": "image", "target": "board", "targetPort": "images" },
+      { "id": "e4", "source": "prompt", "sourcePort": "text", "target": "kit", "targetPort": "prompt" },
+      { "id": "e5", "source": "board", "sourcePort": "image", "target": "kit", "targetPort": "reference" },
+      { "id": "e6", "source": "kit", "sourcePort": "image", "target": "slice", "targetPort": "image" },
+      { "id": "e7", "source": "slice", "sourcePort": "images", "target": "unity", "targetPort": "files" },
+      { "id": "e8", "source": "slice", "sourcePort": "slices", "target": "unity", "targetPort": "context" },
+      { "id": "e9", "source": "board", "sourcePort": "image", "target": "unity", "targetPort": "image" },
+      { "id": "e10", "source": "project", "sourcePort": "text", "target": "unity", "targetPort": "prompt" },
+      { "id": "e11", "source": "board", "sourcePort": "image", "target": "board_out", "targetPort": "value" },
+      { "id": "e12", "source": "slice", "sourcePort": "images", "target": "slices_out", "targetPort": "value" },
+      { "id": "e13", "source": "unity", "sourcePort": "text", "target": "unity_out", "targetPort": "value" }
+    ]
+  }
+}

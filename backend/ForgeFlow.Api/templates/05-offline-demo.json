@@ -1,0 +1,34 @@
+{
+  "id": "offline-demo",
+  "name": "Offline demo (no API keys)",
+  "description": "Mock nodes only — shows fan-out over a list, a collage, a 3D preview and the 9-slice slicer without spending credits. Use it to check the install.",
+  "tags": ["demo", "test"],
+  "graph": {
+    "nodes": [
+      { "id": "prompt", "type": "input.text", "title": "Items (one per line)", "position": { "x": 0, "y": 100 },
+        "params": { "name": "prompt", "value": "red potion\nblue potion\ngreen potion\ngold coin" } },
+      { "id": "split", "type": "text.split", "title": "Split to list", "position": { "x": 320, "y": 100 }, "params": {} },
+      { "id": "gen", "type": "debug.mock", "title": "Fake image per item", "position": { "x": 640, "y": 100 },
+        "mapConcurrency": 4, "params": { "kind": "image", "delayMs": 600 } },
+      { "id": "board", "type": "image.collage", "title": "Collage", "position": { "x": 960, "y": 40 },
+        "params": { "columns": 2, "cell": 256, "gap": 32, "background": "#ffffff" } },
+      { "id": "slice", "type": "image.slice", "title": "Slice back + 9-slice", "position": { "x": 1280, "y": 40 },
+        "params": { "mode": "auto", "tolerance": 20, "minSize": 32 } },
+      { "id": "mesh", "type": "debug.mock", "title": "Fake 3D model", "position": { "x": 960, "y": 260 },
+        "params": { "kind": "model", "delayMs": 800 } },
+      { "id": "r1", "type": "output.result", "title": "Collage", "position": { "x": 1280, "y": -120 }, "params": { "name": "collage" } },
+      { "id": "r2", "type": "output.result", "title": "Slices", "position": { "x": 1600, "y": 40 }, "params": { "name": "slices" } },
+      { "id": "r3", "type": "output.result", "title": "Model", "position": { "x": 1280, "y": 260 }, "params": { "name": "model" } }
+    ],
+    "edges": [
+      { "id": "e1", "source": "prompt", "sourcePort": "text", "target": "split", "targetPort": "text" },
+      { "id": "e2", "source": "split", "sourcePort": "items", "target": "gen", "targetPort": "in" },
+      { "id": "e3", "source": "gen", "sourcePort": "out", "target": "board", "targetPort": "images" },
+      { "id": "e4", "source": "board", "sourcePort": "image", "target": "slice", "targetPort": "image" },
+      { "id": "e5", "source": "prompt", "sourcePort": "text", "target": "mesh", "targetPort": "in" },
+      { "id": "e6", "source": "board", "sourcePort": "image", "target": "r1", "targetPort": "value" },
+      { "id": "e7", "source": "slice", "sourcePort": "slices", "target": "r2", "targetPort": "value" },
+      { "id": "e8", "source": "mesh", "sourcePort": "out", "target": "r3", "targetPort": "value" }
+    ]
+  }
+}

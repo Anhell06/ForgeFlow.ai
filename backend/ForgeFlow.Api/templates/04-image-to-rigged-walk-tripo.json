@@ -1,0 +1,24 @@
+{
+  "id": "image-to-rigged-walk-tripo",
+  "name": "Image → rigged walking model (Tripo only)",
+  "description": "The fastest cloud-only path: Tripo image-to-3D, then Tripo auto-rig, then Tripo retarget to a walk preset. No local software needed.",
+  "tags": ["3d", "tripo", "rigging", "animation"],
+  "graph": {
+    "nodes": [
+      { "id": "image", "type": "input.asset", "title": "Character image", "position": { "x": 0, "y": 100 }, "params": { "name": "image", "asset": "" } },
+      { "id": "mesh", "type": "model.generate3d", "title": "Tripo 3D", "position": { "x": 340, "y": 100 },
+        "params": { "provider": "Tripo", "mode": "image", "options": "{\"texture\": true, \"pbr\": true}" } },
+      { "id": "rig", "type": "tripo.task", "title": "Auto-rig", "position": { "x": 700, "y": 100 },
+        "params": { "provider": "Tripo", "body": "{\"type\":\"animate_rig\",\"original_model_task_id\":\"{{inputs.meta.taskId}}\",\"out_format\":\"glb\"}" } },
+      { "id": "walk", "type": "tripo.task", "title": "Retarget: walk", "position": { "x": 1060, "y": 100 },
+        "params": { "provider": "Tripo", "body": "{\"type\":\"animate_retarget\",\"original_model_task_id\":\"{{inputs.meta.taskId}}\",\"animation\":\"preset:walk\",\"out_format\":\"glb\"}" } },
+      { "id": "result", "type": "output.result", "title": "Walking model", "position": { "x": 1420, "y": 100 }, "params": { "name": "model" } }
+    ],
+    "edges": [
+      { "id": "e1", "source": "image", "sourcePort": "file", "target": "mesh", "targetPort": "image" },
+      { "id": "e2", "source": "mesh", "sourcePort": "meta", "target": "rig", "targetPort": "meta" },
+      { "id": "e3", "source": "rig", "sourcePort": "meta", "target": "walk", "targetPort": "meta" },
+      { "id": "e4", "source": "walk", "sourcePort": "model", "target": "result", "targetPort": "value" }
+    ]
+  }
+}

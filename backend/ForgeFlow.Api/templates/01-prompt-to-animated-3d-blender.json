@@ -1,0 +1,50 @@
+{
+  "id": "prompt-to-animated-3d-blender",
+  "name": "Prompt → animated 3D character (GPT → video → Tripo → Blender agent)",
+  "description": "Prompt → GPT Image concept art → AI video of the motion → Tripo 3D model → a local GPT agent drives Blender through Blender MCP: imports the model, rigs it and recreates the animation from the video frames, then exports an animated GLB.",
+  "tags": ["3d", "animation", "blender", "mcp", "tripo"],
+  "graph": {
+    "nodes": [
+      { "id": "prompt", "type": "input.text", "title": "Character prompt", "position": { "x": 0, "y": 80 },
+        "params": { "name": "prompt", "value": "a stylized fantasy knight with a round shield" } },
+      { "id": "motion", "type": "input.text", "title": "Animation", "position": { "x": 0, "y": 320 },
+        "params": { "name": "animation", "value": "walks forward confidently, full body visible, camera static" } },
+      { "id": "concept", "type": "image.generate", "title": "Concept art (GPT Image)", "position": { "x": 340, "y": 40 },
+        "params": {
+          "provider": "OpenAI", "model": "gpt-image-1", "size": "1024x1536", "count": 1,
+          "prompt": "Full-body game character concept, {{inputs.prompt}}. Neutral A-pose, front view, whole body in frame, plain light-grey background, even lighting, no shadows, no text."
+        } },
+      { "id": "video", "type": "video.generate", "title": "Animate (video model)", "position": { "x": 700, "y": 300 },
+        "params": {
+          "provider": "fal.ai", "model": "fal-ai/kling-video/v2.1/standard/image-to-video", "duration": "5",
+          "prompt": "The character {{workflow.animation}}. Keep the same design, plain background, static camera."
+        } },
+      { "id": "frames", "type": "video.frames", "title": "Frames for the agent", "position": { "x": 1060, "y": 340 },
+        "params": { "fps": 3, "maxFrames": 12 } },
+      { "id": "mesh", "type": "model.generate3d", "title": "3D model (Tripo)", "position": { "x": 700, "y": 20 },
+        "params": { "provider": "Tripo", "mode": "image", "options": "{\"texture\": true, \"pbr\": true}" } },
+      { "id": "blender", "type": "agent.mcp", "title": "Blender agent (local GPT + Blender MCP)", "position": { "x": 1420, "y": 120 },
+        "params": {
+          "provider": "Local LLM (Ollama)", "model": "", "mcpServers": ["Blender MCP"], "maxSteps": 60, "timeoutMin": 45,
+          "prompt": "In Blender (via your tools):\n1. Clear the default scene, then import the 3D model from the input model path.\n2. Scale it to about 1.8 m tall, standing on the ground, facing -Y.\n3. Add a humanoid armature (Rigify basic human or a simple custom skeleton), fit it to the mesh and bind with automatic weights.\n4. Study the reference frames (input files) of this motion: \"{{workflow.animation}}\". Create a looping 2-second action that reproduces it with keyframes on the bones.\n5. Take a viewport screenshot to check the pose.\n6. Export the result as animated GLB (include the armature and animation) into the output folder, and also save the .blend there.\nUse Python code execution in Blender when a dedicated tool is missing."
+        } },
+      { "id": "result", "type": "output.result", "title": "Animated model", "position": { "x": 1780, "y": 120 },
+        "params": { "name": "animated_model" } },
+      { "id": "concept_out", "type": "output.result", "title": "Concept", "position": { "x": 1060, "y": -100 },
+        "params": { "name": "concept" } }
+    ],
+    "edges": [
+      { "id": "e1", "source": "prompt", "sourcePort": "text", "target": "concept", "targetPort": "prompt" },
+      { "id": "e2", "source": "concept", "sourcePort": "image", "target": "video", "targetPort": "image" },
+      { "id": "e3", "source": "motion", "sourcePort": "text", "target": "video", "targetPort": "prompt" },
+      { "id": "e4", "source": "concept", "sourcePort": "image", "target": "mesh", "targetPort": "image" },
+      { "id": "e5", "source": "video", "sourcePort": "video", "target": "frames", "targetPort": "video" },
+      { "id": "e6", "source": "mesh", "sourcePort": "model", "target": "blender", "targetPort": "model" },
+      { "id": "e7", "source": "video", "sourcePort": "video", "target": "blender", "targetPort": "video" },
+      { "id": "e8", "source": "frames", "sourcePort": "frames", "target": "blender", "targetPort": "files" },
+      { "id": "e9", "source": "motion", "sourcePort": "text", "target": "blender", "targetPort": "prompt" },
+      { "id": "e10", "source": "blender", "sourcePort": "model", "target": "result", "targetPort": "value" },
+      { "id": "e11", "source": "concept", "sourcePort": "image", "target": "concept_out", "targetPort": "value" }
+    ]
+  }
+}

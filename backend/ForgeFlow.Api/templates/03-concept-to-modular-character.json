@@ -1,0 +1,45 @@
+{
+  "id": "concept-to-modular-character",
+  "name": "Concept art → modular character by parts (AssetHub-style)",
+  "description": "A vision LLM splits a concept image into parts (body, hair, armor, boots…). Each part gets its own isolated image and its own 3D mesh — so any part can be regenerated alone with 'Rerun from node'. A Blender agent assembles the parts on one rig-ready character.",
+  "tags": ["3d", "parts", "modular", "blender", "mcp"],
+  "graph": {
+    "nodes": [
+      { "id": "concept", "type": "input.asset", "title": "Concept image", "position": { "x": 0, "y": 140 },
+        "params": { "name": "image", "asset": "" } },
+      { "id": "parts", "type": "llm.chat", "title": "Split into parts (vision LLM)", "position": { "x": 340, "y": 140 },
+        "params": {
+          "provider": "OpenAI", "format": "list",
+          "system": "You are a 3D character artist planning a modular character.",
+          "prompt": "Look at the concept image. List the separate parts a 3D artist would model as individual meshes (base body, head/face, hair, each clothing/armor piece, boots, gloves, weapon, accessories). Return a JSON array of objects: {\"name\": short_snake_case, \"description\": a precise visual description of that part alone incl. colors and materials}. 5–12 parts."
+        } },
+      { "id": "part_images", "type": "image.generate", "title": "Isolated part images", "position": { "x": 700, "y": 60 },
+        "mapConcurrency": 3,
+        "params": {
+          "provider": "OpenAI", "model": "gpt-image-1", "size": "1024x1024",
+          "prompt": "Isolated 3D-modeling reference of only this part of the character: {{inputs.prompt.description}}. Same design as the reference image, shown alone, front three-quarter view, centered, plain white background, no body unless the part is the body."
+        } },
+      { "id": "part_meshes", "type": "model.generate3d", "title": "Mesh per part", "position": { "x": 1060, "y": 60 },
+        "mapConcurrency": 3,
+        "params": { "provider": "Tripo", "mode": "image", "options": "{\"texture\": true, \"pbr\": true}" } },
+      { "id": "assemble", "type": "agent.mcp", "title": "Assemble in Blender", "position": { "x": 1420, "y": 140 },
+        "params": {
+          "provider": "Local LLM (Ollama)", "mcpServers": ["Blender MCP"], "maxSteps": 80, "timeoutMin": 60,
+          "prompt": "Assemble a modular character in Blender from the part meshes in the input files. The part list is in the context (same order as the files). Import every file, name each object after its part, scale and position the parts so they fit together on one ~1.8 m character like in the concept image (input image). Keep parts as separate objects in a collection 'Character'. Screenshot the viewport to verify, then export one GLB with all parts and also the .blend into the output folder."
+        } },
+      { "id": "result", "type": "output.result", "title": "Assembled character", "position": { "x": 1780, "y": 140 }, "params": { "name": "character" } },
+      { "id": "parts_out", "type": "output.result", "title": "Part meshes", "position": { "x": 1420, "y": 380 }, "params": { "name": "part_meshes" } }
+    ],
+    "edges": [
+      { "id": "e1", "source": "concept", "sourcePort": "file", "target": "parts", "targetPort": "images" },
+      { "id": "e2", "source": "parts", "sourcePort": "items", "target": "part_images", "targetPort": "prompt" },
+      { "id": "e3", "source": "concept", "sourcePort": "file", "target": "part_images", "targetPort": "reference" },
+      { "id": "e4", "source": "part_images", "sourcePort": "image", "target": "part_meshes", "targetPort": "image" },
+      { "id": "e5", "source": "part_meshes", "sourcePort": "model", "target": "assemble", "targetPort": "files" },
+      { "id": "e6", "source": "parts", "sourcePort": "json", "target": "assemble", "targetPort": "context" },
+      { "id": "e7", "source": "concept", "sourcePort": "file", "target": "assemble", "targetPort": "image" },
+      { "id": "e8", "source": "assemble", "sourcePort": "model", "target": "result", "targetPort": "value" },
+      { "id": "e9", "source": "part_meshes", "sourcePort": "model", "target": "parts_out", "targetPort": "value" }
+    ]
+  }
+}
