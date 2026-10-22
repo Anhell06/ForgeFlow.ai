@@ -102,6 +102,7 @@ export const api = {
   deleteRun: (id: string) => request<void>("DELETE", `/api/runs/${id}`),
 
   assets: (kind?: string, q?: string) => request<Asset[]>("GET", `/api/assets?limit=300${kind ? `&kind=${kind}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`),
+  asset: (id: string) => request<Asset>("GET", `/api/assets/${id}`),
   upload: (files: FileList | File[]) => {
     const fd = new FormData();
     for (const f of Array.from(files)) fd.append("files", f);

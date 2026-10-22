@@ -1,6 +1,7 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState, type DragEvent } from "react";
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from "@xyflow/react";
-import { isAsset, kindColor, type Asset, type NodeDef, type NodeSpec, type NodeState } from "../api";
+import { api, isAsset, kindColor, type Asset, type NodeDef, type NodeSpec, type NodeState } from "../api";
+import { toastError } from "./Toast";
 import { CanvasPreview, fileUrl, ValueView } from "./Preview";
 import { Modal } from "./ui";
 import { useI18n, type MsgKey } from "../i18n";
@@ -10,7 +11,11 @@ export type PreviewHint = { source: string; from: string; to: string; shown: num
 export type ForgeNodeData = { def: NodeDef; spec?: NodeSpec; state?: NodeState; hint?: PreviewHint };
 
 /** Editor actions nodes can trigger without threading callbacks through node data. */
-export const EditorActions = createContext<{ showAll?: (previewId: string, hint: PreviewHint) => void }>({});
+export const EditorActions = createContext<{
+  showAll?: (previewId: string, hint: PreviewHint) => void;
+  /** Changes one param of a node (undoable, typing merges into one step). */
+  setParam?: (nodeId: string, name: string, value: unknown) => void;
+}>({});
 export type ForgeNode = Node<ForgeNodeData, "forge">;
 
 function firstAsset(outputs: Record<string, unknown> | undefined): Asset | undefined {
@@ -87,6 +92,7 @@ function StandardNode({ data, selected }: NodeProps<ForgeNode>) {
   const color = spec?.color ?? "#64748b";
   const status = state?.status;
   const thumb = firstAsset(state?.outputs);
+  const inline = def.type === "input.text" || def.type === "input.asset";
   const preview = typeof def.params?.prompt === "string" ? (def.params.prompt as string)
     : typeof def.params?.value === "string" ? (def.params.value as string) : "";
 
@@ -120,17 +126,79 @@ function StandardNode({ data, selected }: NodeProps<ForgeNode>) {
           ))}
         </div>
       </div>
-      {(preview || state?.message || state?.error || thumb || status === "running") && (
+      {def.type === "input.text" && <InlineText def={def} />}
+      {def.type === "input.asset" && <InlineAsset def={def} />}
+      {(preview && !inline || state?.message || state?.error || thumb && !inline || status === "running") && (
         <div className="fnode-foot">
-          {preview && !state && <div style={{ overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{preview}</div>}
+          {preview && !inline && !state && <div style={{ overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{preview}</div>}
           {state?.error && <div style={{ color: "var(--err)" }}>{state.error.slice(0, 140)}</div>}
           {!state?.error && state?.message && <div>{state.message}{state.items ? ` · ${state.itemsDone ?? 0}/${state.items}` : ""}</div>}
           {status === "running" && <div className="progress"><div style={{ width: `${Math.round((state?.progress ?? 0.05) * 100)}%` }} /></div>}
-          {thumb && thumb.kind === "image" && <img className="fnode-thumb" src={fileUrl(thumb)} alt="" />}
-          {thumb && thumb.kind === "video" && <video className="fnode-thumb" src={fileUrl(thumb)} muted autoPlay loop playsInline />}
-          {thumb && thumb.kind === "model" && <div style={{ marginTop: 6 }}>⬢ {thumb.name}</div>}
+          {thumb && !inline && thumb.kind === "image" && <img className="fnode-thumb" src={fileUrl(thumb)} alt="" />}
+          {thumb && !inline && thumb.kind === "video" && <video className="fnode-thumb" src={fileUrl(thumb)} muted autoPlay loop playsInline />}
+          {thumb && !inline && thumb.kind === "model" && <div style={{ marginTop: 6 }}>⬢ {thumb.name}</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+/** The value of a Text input, edited right on the canvas. */
+function InlineText({ def }: { def: NodeDef }) {
+  const { t } = useI18n();
+  const actions = useContext(EditorActions);
+  const value = typeof def.params.value === "string" ? def.params.value : "";
+  return (
+    <div className="fnode-edit">
+      <textarea className="nodrag nowheel" rows={4} value={value} placeholder={t("node.textPlaceholder")} spellCheck={false}
+        onChange={(e) => actions.setParam?.(def.id, "value", e.target.value)} />
+    </div>
+  );
+}
+
+/** The file of a File input: id/URL/path field, upload button, drop target and a preview of the chosen asset. */
+function InlineAsset({ def }: { def: NodeDef }) {
+  const { t } = useI18n();
+  const actions = useContext(EditorActions);
+  const value = typeof def.params.asset === "string" ? def.params.asset : "";
+  const [info, setInfo] = useState<Asset | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [over, setOver] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    if (/^ast_[0-9a-f]+$/i.test(value.trim())) api.asset(value.trim()).then((a) => alive && setInfo(a)).catch(() => alive && setInfo(null));
+    else setInfo(null);
+    return () => { alive = false; };
+  }, [value]);
+
+  const upload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setBusy(true);
+    try {
+      const [a] = await api.upload(files);
+      actions.setParam?.(def.id, "asset", a.$asset);
+    } catch (e) { toastError(e); } finally { setBusy(false); }
+  };
+  const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
+
+  return (
+    <div className={"fnode-edit" + (over ? " over" : "")}
+      onDragOver={(e) => { if (hasFiles(e)) { e.preventDefault(); e.stopPropagation(); setOver(true); } }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { if (hasFiles(e)) { e.preventDefault(); e.stopPropagation(); setOver(false); void upload(e.dataTransfer.files); } }}>
+      <div className="row">
+        <input className="nodrag" value={value} placeholder={t("node.assetPlaceholder")} spellCheck={false}
+          onChange={(e) => actions.setParam?.(def.id, "asset", e.target.value)} />
+        <label className="btn small nodrag" title={t("editor.upload")}>
+          {busy ? "…" : "⤒"}
+          <input type="file" hidden onChange={(e) => void upload(e.target.files)} />
+        </label>
+      </div>
+      {info && info.kind === "image" && <img className="fnode-thumb" src={fileUrl(info)} alt={info.name} />}
+      {info && info.kind === "video" && <video className="fnode-thumb" src={fileUrl(info)} muted autoPlay loop playsInline />}
+      {info && info.kind !== "image" && info.kind !== "video" && <div className="help" style={{ marginTop: 6 }}>{info.kind === "model" ? "⬢" : "▤"} {info.name}</div>}
+      {!value && <div className="help" style={{ marginTop: 6 }}>{t("node.dropHint")}</div>}
     </div>
   );
 }

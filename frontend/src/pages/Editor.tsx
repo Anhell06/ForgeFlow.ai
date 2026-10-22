@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } fro
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   addEdge, Background, Controls, MiniMap, ReactFlow, ReactFlowProvider, useEdgesState, useNodesInitialized, useNodesState, useReactFlow,
-  type Connection, type Edge, type IsValidConnection,
+  type Connection, type Edge, type IsValidConnection, type OnConnectEnd,
 } from "@xyflow/react";
 import {
   api, compatible, formatDuration, subscribe, type Graph, type McpServer, type NodeDef, type NodeSpec, type NodeState, type Provider, type Run,
@@ -10,10 +10,11 @@ import {
 import { EditorActions, FlowNode, type ForgeNode, type PreviewHint } from "../components/FlowNode";
 import { ParamField } from "../components/ParamField";
 import { ValueView } from "../components/Preview";
-import { Field, Modal, Status } from "../components/ui";
+import { Field, Status } from "../components/ui";
 import { toast, toastError } from "../components/Toast";
 import { LanguageSelect, useI18n } from "../i18n";
 import { useHistory } from "../useHistory";
+import { NodePicker, type PickerChoice, type PickerOrigin } from "../components/NodePicker";
 
 interface Snapshot {
   nodes: ForgeNode[];
@@ -60,7 +61,6 @@ function EditorInner() {
   const [dirty, setDirty] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const [states, setStates] = useState<Record<string, NodeState>>({});
-  const [showRun, setShowRun] = useState(false);
   const [filter, setFilter] = useState("");
   const [tab, setTab] = useState<"params" | "output" | "logs">("params");
   const unsub = useRef<(() => void) | null>(null);
@@ -244,6 +244,50 @@ function EditorInner() {
     markDirty();
   };
 
+  // ---- drop a dragged connection on empty canvas → pick a compatible node ----
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [picker, setPicker] = useState<{ x: number; y: number; at: { x: number; y: number }; nodeId: string; handleId: string; origin: PickerOrigin } | null>(null);
+
+  const onConnectEnd: OnConnectEnd = (event, cs) => {
+    if (cs.isValid || !cs.fromHandle || !cs.fromNode) return;
+    const from = cs.fromHandle.type; // "source" = dragged out of an output
+    const spec = (cs.fromNode.data as ForgeNode["data"]).spec;
+    const port = (from === "source" ? spec?.outputs : spec?.inputs)?.find((p) => p.name === cs.fromHandle!.id);
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!port || !rect) return;
+    const pt = "changedTouches" in event ? event.changedTouches[0] : event;
+    setPicker({
+      x: Math.min(pt.clientX - rect.left, rect.width - 330), y: Math.min(pt.clientY - rect.top, rect.height - 380),
+      at: flow.screenToFlowPosition({ x: pt.clientX, y: pt.clientY }),
+      nodeId: cs.fromNode.id, handleId: cs.fromHandle.id ?? "", origin: { from, port },
+    });
+  };
+
+  /** Creates the picked node where the connection was dropped and wires it up — one undo step. */
+  const createConnected = (choice: PickerChoice) => {
+    if (!picker) return;
+    const { origin, nodeId, handleId, at } = picker;
+    setPicker(null);
+    const spec = choice.spec;
+    const def: NodeDef = { id: newId(spec.type), type: spec.type, title: localize(spec).title, params: {} };
+    // Put the new node so its port sits roughly under the cursor: right of an output, left of an input.
+    const width = resizable(spec.type) ? 340 : 240;
+    const position = origin.from === "source" ? { x: at.x + 20, y: at.y - 40 } : { x: at.x - width - 20, y: at.y - 40 };
+    record();
+    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), { id: def.id, type: "forge", position, data: { def, spec }, selected: true, ...sizeFor(def) }]);
+    const c = origin.from === "source"
+      ? { source: nodeId, sourceHandle: handleId, target: def.id, targetHandle: choice.port }
+      : { source: def.id, sourceHandle: choice.port, target: nodeId, targetHandle: handleId };
+    setEdges((es) => {
+      // Dragged out of an existing single-value input: the new connection replaces the old one.
+      const kept = origin.from === "target" && !origin.port.list ? es.filter((e) => !(e.target === nodeId && e.targetHandle === handleId)) : es;
+      return [...kept, { ...c, id: `e_${c.source}_${c.sourceHandle}_${c.target}_${c.targetHandle}` }];
+    });
+    setSelectedId(def.id);
+    setTab("params");
+    markDirty();
+  };
+
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     const type = e.dataTransfer.getData("application/forgeflow-node");
@@ -290,7 +334,6 @@ function EditorInner() {
       const r = await api.runWorkflow(id, inputs);
       record(); // previous results become one undo step
       setStates({});
-      setShowRun(false);
       attachRun(r.id);
       toast(t("editor.runStarted"));
     } catch (e) { toastError(e); }
@@ -322,12 +365,13 @@ function EditorInner() {
         { id: edge.id, source: hint.source, sourcePort: hint.to, target: previewId, targetPort: "value" }],
     }, false); // the rewire above is already the one undo step
   };
-  const actions = { showAll };
+  const setParam = (nodeId: string, param: string, value: unknown) =>
+    updateDef(nodeId, `param:${param}`, (d) => ({ ...d, params: { ...d.params, [param]: value } }));
+  const actions = { showAll, setParam };
 
   const selected = nodes.find((n) => n.id === selectedId);
   const selectedSpec = selected?.data.spec && localize(selected.data.spec);
   const selectedState = selectedId ? states[selectedId] : undefined;
-  const inputNodes = nodes.filter((n) => n.data.def.type === "input.text" || n.data.def.type === "input.asset");
   const running = run?.status === "running" || run?.status === "queued";
 
   const categories = useMemo(() => {
@@ -357,7 +401,8 @@ function EditorInner() {
         <LanguageSelect compact />
         {running && <button onClick={() => run && api.cancelRun(run.id).catch(toastError)}>{t("editor.stop")}</button>}
         <button onClick={() => void save().then((ok) => ok && toast(t("common.saved")))}>{t("common.save")}</button>
-        <button className="primary" onClick={() => (inputNodes.length ? setShowRun(true) : void startRun({}))}>{t("editor.run")}</button>
+        {/* Input values live in the input nodes themselves, so a run starts right away with them. */}
+        <button className="primary" disabled={running} onClick={() => void startRun({})}>{t("editor.run")}</button>
       </div>
 
       <div className="palette">
@@ -378,7 +423,7 @@ function EditorInner() {
         <div className="help" style={{ marginTop: 14 }}>{t("editor.paletteHelp")}</div>
       </div>
 
-      <div className="canvas" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+      <div className="canvas" ref={canvasRef} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
         <EditorActions.Provider value={actions}>
         <ReactFlow<ForgeNode, Edge>
           nodes={nodes}
@@ -405,6 +450,7 @@ function EditorInner() {
             if (before && moved) history.record(before);
           }}
           onConnect={onConnect}
+          onConnectEnd={onConnectEnd}
           isValidConnection={isValidConnection}
           onSelectionChange={({ nodes: sel }) => setSelectedId(sel[0]?.id ?? null)}
           deleteKeyCode={["Delete", "Backspace"]}
@@ -418,6 +464,10 @@ function EditorInner() {
           <MiniMap pannable zoomable nodeColor={(n) => (n as ForgeNode).data.spec?.color ?? "#555"} />
         </ReactFlow>
         </EditorActions.Provider>
+        {picker && (
+          <NodePicker x={picker.x} y={picker.y} specs={specs} origin={picker.origin}
+            onPick={createConnected} onClose={() => setPicker(null)} />
+        )}
       </div>
 
       <div className="inspector">
@@ -500,50 +550,6 @@ function EditorInner() {
           </div>
         )}
       </div>
-
-      {showRun && <RunDialog inputs={inputNodes.map((n) => n.data.def)} onClose={() => setShowRun(false)} onRun={startRun} />}
     </div>
-  );
-}
-
-function RunDialog({ inputs, onClose, onRun }: { inputs: NodeDef[]; onClose: () => void; onRun: (v: Record<string, unknown>) => void }) {
-  const [values, setValues] = useState<Record<string, unknown>>(() =>
-    Object.fromEntries(inputs.map((d) => [String(d.params.name ?? (d.type === "input.text" ? "prompt" : "image")), d.type === "input.text" ? d.params.value ?? "" : d.params.asset ?? ""])));
-  const [busy, setBusy] = useState(false);
-  const { t } = useI18n();
-
-  const upload = async (name: string, files: FileList | null) => {
-    if (!files?.length) return;
-    setBusy(true);
-    try {
-      const [a] = await api.upload(files);
-      setValues((v) => ({ ...v, [name]: a.$asset }));
-    } catch (e) { toastError(e); } finally { setBusy(false); }
-  };
-
-  return (
-    <Modal title={t("editor.runDialog")} onClose={onClose}>
-      {inputs.map((d) => {
-        const name = String(d.params.name ?? (d.type === "input.text" ? "prompt" : "image"));
-        const value = String(values[name] ?? "");
-        return d.type === "input.text" ? (
-          <Field key={d.id} label={`${d.title ?? name} · ${name}`}>
-            <textarea rows={3} value={value} onChange={(e) => setValues({ ...values, [name]: e.target.value })} />
-          </Field>
-        ) : (
-          <Field key={d.id} label={`${d.title ?? name} · ${name}`} help={t("editor.assetHelp")}>
-            <div className="row">
-              <input value={value} onChange={(e) => setValues({ ...values, [name]: e.target.value })} />
-              <label className="btn">{t("editor.upload")}<input type="file" hidden onChange={(e) => upload(name, e.target.files)} /></label>
-            </div>
-          </Field>
-        );
-      })}
-      <div className="row">
-        <span className="spacer" />
-        <button onClick={onClose}>{t("common.cancel")}</button>
-        <button className="primary" disabled={busy} onClick={() => onRun(values)}>{t("editor.run")}</button>
-      </div>
-    </Modal>
   );
 }
