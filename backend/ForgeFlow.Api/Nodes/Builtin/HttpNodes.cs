@@ -217,7 +217,11 @@ public class ComfyWorkflowNode : NodeBase
         "Runs a ComfyUI workflow exported in API format (Workflow → Export (API)). Connected images are uploaded first; " +
         "reference them as {{comfy.image}}, text as {{inputs.prompt | escape}}. Works for image, video and 3D (Hunyuan3D, TRELLIS) workflows.",
         [new("prompt", Kinds.Text), new("image", Kinds.Image), new("images", Kinds.Image, List: true), new("in", Kinds.Any)],
-        [new("image", Kinds.Image), new("images", Kinds.Image, List: true), new("model", Kinds.Model), new("video", Kinds.Video), new("files", Kinds.File, List: true)],
+        [
+            new("image", Kinds.Image, Label: "image (1st)", Help: "Only the first image"),
+            new("images", Kinds.Image, List: true, Label: "images (all)", Help: "Every image the workflow saved"),
+            new("model", Kinds.Model), new("video", Kinds.Video), new("files", Kinds.File, List: true),
+        ],
         [
             P.Provider("comfyui"),
             new("workflow", "code", "Workflow (API JSON)", JsonValue.Create("{}")),

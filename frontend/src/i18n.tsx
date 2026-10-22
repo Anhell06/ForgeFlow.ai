@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type { NodeSpec } from "./api";
-import { nodeTextRu, paramTextRu, categoryRu, templateRu } from "./i18n-nodes.ru";
+import { nodeTextRu, paramTextRu, categoryRu, templateRu, portTextRu } from "./i18n-nodes.ru";
 
 export type Lang = "en" | "ru";
 export const languages: { code: Lang; label: string }[] = [
@@ -54,6 +54,8 @@ const en = {
   "pipelines.templates": "Templates",
   "pipelines.nodes": "{n} nodes",
 
+  "editor.undo": "Undo (Ctrl+Z)",
+  "editor.redo": "Redo (Ctrl+Shift+Z / Ctrl+Y)",
   "editor.unsaved": "unsaved",
   "editor.details": "details",
   "editor.stop": "Stop",
@@ -131,6 +133,8 @@ const en = {
   "preview.empty": "Run the pipeline — the result will appear here.",
   "preview.expand": "Open full size",
   "preview.download": "Download",
+  "preview.partial": "Showing {shown} of {total} — the rest are on the {port}[] output.",
+  "preview.showAll": "Show all",
 
   "param.auto": "(auto: first available)",
   "param.noKey": "no key",
@@ -244,6 +248,8 @@ const ru: Record<MsgKey, string> = {
   "pipelines.templates": "Шаблоны",
   "pipelines.nodes": "нод: {n}",
 
+  "editor.undo": "Отменить (Ctrl+Z)",
+  "editor.redo": "Повторить (Ctrl+Shift+Z / Ctrl+Y)",
   "editor.unsaved": "не сохранено",
   "editor.details": "подробнее",
   "editor.stop": "Стоп",
@@ -321,6 +327,8 @@ const ru: Record<MsgKey, string> = {
   "preview.empty": "Запустите конвейер — результат появится здесь.",
   "preview.expand": "Открыть во весь экран",
   "preview.download": "Скачать",
+  "preview.partial": "Показано {shown} из {total} — остальные на выходе {port}[].",
+  "preview.showAll": "Показать все",
 
   "param.auto": "(авто: первый доступный)",
   "param.noKey": "нет ключа",
@@ -441,6 +449,10 @@ export function LangProvider({ children }: { children: ReactNode }) {
         title: tr?.title ?? s.title,
         description: tr?.description ?? s.description,
         category: category(s.category),
+        outputs: s.outputs.map((p) => {
+          const pt = p.label ? portTextRu[p.label] : undefined;
+          return pt ? { ...p, label: pt.label ?? p.label, help: pt.help ?? p.help } : p;
+        }),
         params: s.params.map((p) => {
           const pt = tr?.params?.[p.name] ?? paramTextRu[p.name];
           return { ...p, label: pt?.label ?? p.label, help: pt?.help === undefined ? p.help : pt.help || undefined };

@@ -64,7 +64,10 @@ public class ImageGenerateNode : NodeBase
     public override NodeSpec Spec { get; } = new("image.generate", "Generate image", "AI · Image",
         "Text (+ optional reference images) → image. OpenAI GPT Image, or any image model on fal / Replicate.",
         [new("prompt", Kinds.Text), new("reference", Kinds.Image, List: true)],
-        [new("image", Kinds.Image), new("images", Kinds.Image, List: true)],
+        [
+            new("image", Kinds.Image, Label: "image (1st)", Help: "Only the first image"),
+            new("images", Kinds.Image, List: true, Label: "images (all)", Help: "Every generated image (Images > 1)"),
+        ],
         [
             P.Provider("openai", "fal", "replicate"),
             P.Model("gpt-image-1", "OpenAI: gpt-image-1 … · fal: fal-ai/flux/dev … · Replicate: black-forest-labs/flux-schnell"),

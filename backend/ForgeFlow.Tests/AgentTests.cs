@@ -51,6 +51,66 @@ public class AgentTests(ForgeFactory factory)
         Assert.Contains("wrote 20 chars", llm.LastToolResult);
     }
 
+    [Fact]
+    public async Task RerunWithEditedGraphReusesUnchangedGenerations()
+    {
+        await using var llm = await FakeLlm.StartAsync();
+        var provider = await (await _http.PostAsJsonAsync("/api/providers", new { name = "fake-images", type = "openai", baseUrl = llm.BaseUrl, apiKey = "x" }))
+            .Content.ReadFromJsonAsync<JsonObject>();
+        var pid = provider!["id"]!.GetValue<string>();
+
+        object Graph(string previewPort) => new
+        {
+            nodes = new object[]
+            {
+                new { id = "gen", type = "image.generate", @params = new { provider = pid, prompt = "logo", count = 2 } },
+                new { id = "view", type = "output.preview", @params = new { } },
+            },
+            edges = new[] { new { id = "e", source = "gen", sourcePort = previewPort, target = "view", targetPort = "value" } },
+        };
+        var wf = await (await _http.PostAsJsonAsync("/api/workflows", new { name = "rerun graph test", graph = Graph("image") })).Content.ReadFromJsonAsync<JsonObject>();
+        var first = await (await _http.PostAsJsonAsync($"/api/workflows/{wf!["id"]}/run", new { wait = true })).Content.ReadFromJsonAsync<JsonObject>();
+        Assert.Equal("succeeded", first!["status"]!.GetValue<string>());
+        Assert.IsType<JsonObject>(first["nodes"]!["view"]!["outputs"]!["value"]); // "image" = the first one only
+        var calls = llm.ImageCalls;
+
+        // Rewire the preview to "images" and rerun from it with the edited graph: nothing is regenerated.
+        var rerun = await (await _http.PostAsJsonAsync($"/api/runs/{first["id"]}/rerun", new { fromNodeId = "view", graph = Graph("images") }))
+            .Content.ReadFromJsonAsync<JsonObject>();
+        JsonObject? done = null;
+        for (var i = 0; i < 100 && done?["status"]?.GetValue<string>() is not ("succeeded" or "failed"); i++)
+        {
+            await Task.Delay(100);
+            done = await _http.GetFromJsonAsync<JsonObject>($"/api/runs/{rerun!["id"]}");
+        }
+        Assert.Equal("succeeded", done!["status"]!.GetValue<string>());
+        Assert.True(done["nodes"]!["gen"]!["cached"]!.GetValue<bool>());
+        Assert.Equal(2, done["nodes"]!["view"]!["outputs"]!["value"]!.AsArray().Count);
+        Assert.Equal(calls, llm.ImageCalls);
+
+        // A changed generation setting is not reused.
+        var changed = new
+        {
+            nodes = new object[]
+            {
+                new { id = "gen", type = "image.generate", @params = new { provider = pid, prompt = "other logo", count = 2 } },
+                new { id = "view", type = "output.preview", @params = new { } },
+            },
+            edges = new[] { new { id = "e", source = "gen", sourcePort = "images", target = "view", targetPort = "value" } },
+        };
+        var rerun2 = await (await _http.PostAsJsonAsync($"/api/runs/{first["id"]}/rerun", new { fromNodeId = "view", graph = changed }))
+            .Content.ReadFromJsonAsync<JsonObject>();
+        done = null;
+        for (var i = 0; i < 100 && done?["status"]?.GetValue<string>() is not ("succeeded" or "failed"); i++)
+        {
+            await Task.Delay(100);
+            done = await _http.GetFromJsonAsync<JsonObject>($"/api/runs/{rerun2!["id"]}");
+        }
+        Assert.Equal("succeeded", done!["status"]!.GetValue<string>());
+        Assert.False(done["nodes"]!["gen"]!["cached"]!.GetValue<bool>());
+        Assert.Equal(calls + 1, llm.ImageCalls);
+    }
+
     async Task<string> FindMcp(string name)
     {
         var list = await _http.GetFromJsonAsync<JsonArray>("/api/mcp-servers");
@@ -63,7 +123,11 @@ public class AgentTests(ForgeFactory factory)
         WebApplication _app = null!;
         public string BaseUrl { get; private set; } = "";
         public int Calls;
+        public int ImageCalls;
         public string LastToolResult = "";
+
+        // 1×1 PNG.
+        const string Png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
         public static async Task<FakeLlm> StartAsync()
         {
@@ -95,6 +159,16 @@ public class AgentTests(ForgeFactory factory)
                 }
                 fake.LastToolResult = last["content"]!.GetValue<string>();
                 return Results.Json(Completion(new JsonObject { ["role"] = "assistant", ["content"] = "Done: the file is ready." }, "stop"));
+            });
+            app.MapPost("/v1/images/generations", async (HttpContext ctx) =>
+            {
+                var body = (await JsonNode.ParseAsync(ctx.Request.Body))!;
+                Interlocked.Increment(ref fake.ImageCalls);
+                var n = body["n"]?.GetValue<int>() ?? 1;
+                return Results.Json(new JsonObject
+                {
+                    ["data"] = new JsonArray(Enumerable.Range(0, n).Select(_ => (JsonNode)new JsonObject { ["b64_json"] = Png }).ToArray()),
+                });
             });
             await app.StartAsync();
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();

@@ -14,7 +14,7 @@ namespace ForgeFlow.Api;
 public record RunRequest(JsonObject? Inputs, bool Wait = false, int WaitSeconds = 300);
 public record AdhocRunRequest(WorkflowGraph Graph, JsonObject? Inputs, string? Name, string? WorkflowId);
 public record NodeRunRequest(JsonObject? Inputs, JsonObject? Params, bool Wait = false, int WaitSeconds = 300);
-public record RerunRequest(string? FromNodeId, JsonObject? Inputs);
+public record RerunRequest(string? FromNodeId, JsonObject? Inputs, WorkflowGraph? Graph);
 public record WorkflowDto(string? Name, string? Description, WorkflowGraph? Graph);
 
 public static class Endpoints
@@ -249,8 +249,9 @@ public static class Endpoints
             await runs.CancelAsync(id) ? Results.Ok(new { canceled = true }) : Results.Conflict(new { error = "Run is not active" }));
         api.MapPost("/runs/{id}/rerun", async (string id, RerunRequest? req, RunService runs, CancellationToken ct) =>
         {
-            try { return Results.Ok(RunView(await runs.RerunAsync(id, req?.FromNodeId, req?.Inputs, ct), true)); }
+            try { return Results.Ok(RunView(await runs.RerunAsync(id, req?.FromNodeId, req?.Inputs, ct, req?.Graph), true)); }
             catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+            catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
         api.MapDelete("/runs/{id}", async (string id, IDbContextFactory<AppDb> dbf, CancellationToken ct) =>
         {

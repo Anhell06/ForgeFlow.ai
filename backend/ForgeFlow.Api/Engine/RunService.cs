@@ -40,29 +40,52 @@ public class RunService(IDbContextFactory<AppDb> dbf, RunEvents events, IService
         return run;
     }
 
-    /// <summary>Re-runs a finished run. With fromNodeId, everything upstream of that node is reused from the old run.</summary>
-    public async Task<RunEntity> RerunAsync(string runId, string? fromNodeId, JsonObject? inputsOverride, CancellationToken ct)
+    /// <summary>
+    /// Re-runs a finished run. With fromNodeId, nodes upstream of it are reused from the old run.
+    /// With graphOverride (the edited pipeline), a node is reused only if it, its inputs and everything upstream
+    /// are unchanged — so edits downstream of expensive generations do not regenerate them.
+    /// </summary>
+    public async Task<RunEntity> RerunAsync(string runId, string? fromNodeId, JsonObject? inputsOverride, CancellationToken ct,
+        WorkflowGraph? graphOverride = null)
     {
         RunEntity old;
         await using (var db = await dbf.CreateDbContextAsync(ct))
             old = await db.Runs.FindAsync([runId], ct) ?? throw new KeyNotFoundException("Run not found");
-        var graph = Json.De<WorkflowGraph>(old.Graph);
+        var oldGraph = Json.De<WorkflowGraph>(old.Graph);
+        var graph = graphOverride ?? oldGraph;
         Dictionary<string, NodeState>? reuse = null;
         if (!string.IsNullOrEmpty(fromNodeId))
         {
             if (graph.Node(fromNodeId) is null) throw new KeyNotFoundException($"Node {fromNodeId} not in run");
             var dirty = graph.DownstreamOf(fromNodeId);
             var oldStates = Json.De<Dictionary<string, NodeState>>(old.NodeStates);
-            reuse = oldStates
-                .Where(kv => !dirty.Contains(kv.Key) && kv.Value.Status == "succeeded")
-                .ToDictionary(kv => kv.Key, kv => new NodeState
-                {
-                    Status = "succeeded", Outputs = kv.Value.Outputs, Cached = true, StartedAt = kv.Value.StartedAt,
-                    FinishedAt = kv.Value.FinishedAt, Logs = ["reused from " + runId],
-                });
+            var reusable = new HashSet<string>();
+            foreach (var id in graph.TopologicalOrder())
+            {
+                if (dirty.Contains(id) || !oldStates.TryGetValue(id, out var st) || st.Status != "succeeded") continue;
+                if (!SameNode(graph, oldGraph, id)) continue;
+                if (graph.Upstream(id).All(reusable.Contains)) reusable.Add(id);
+            }
+            reuse = reusable.ToDictionary(id => id, id => new NodeState
+            {
+                Status = "succeeded", Outputs = oldStates[id].Outputs, Cached = true, StartedAt = oldStates[id].StartedAt,
+                FinishedAt = oldStates[id].FinishedAt, Logs = ["reused from " + runId],
+            });
         }
         var inputs = inputsOverride ?? Json.ParseObject(old.Inputs);
         return await CreateAsync(graph, inputs, old.Name, old.WorkflowId, reuse, runId, ct);
+    }
+
+    /// <summary>Same type, settings and incoming connections in both graphs.</summary>
+    static bool SameNode(WorkflowGraph a, WorkflowGraph b, string id)
+    {
+        var na = a.Node(id);
+        var nb = b.Node(id);
+        if (na is null || nb is null || na.Type != nb.Type || na.Disabled != nb.Disabled) return false;
+        if (!JsonNode.DeepEquals(na.Params, nb.Params)) return false;
+        static string Inputs(WorkflowGraph g, string id) =>
+            string.Join("|", g.IncomingEdges(id).Select(e => $"{e.Source}.{e.SourcePort}>{e.TargetPort}").Order());
+        return Inputs(a, id) == Inputs(b, id);
     }
 
     public async Task<bool> CancelAsync(string runId)

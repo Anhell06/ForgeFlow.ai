@@ -7,12 +7,21 @@ import {
 import {
   api, compatible, formatDuration, subscribe, type Graph, type McpServer, type NodeDef, type NodeSpec, type NodeState, type Provider, type Run,
 } from "../api";
-import { FlowNode, type ForgeNode } from "../components/FlowNode";
+import { EditorActions, FlowNode, type ForgeNode, type PreviewHint } from "../components/FlowNode";
 import { ParamField } from "../components/ParamField";
 import { ValueView } from "../components/Preview";
 import { Field, Modal, Status } from "../components/ui";
 import { toast, toastError } from "../components/Toast";
 import { LanguageSelect, useI18n } from "../i18n";
+import { useHistory } from "../useHistory";
+
+interface Snapshot {
+  nodes: ForgeNode[];
+  edges: Edge[];
+  states: Record<string, NodeState>;
+  run: Run | null;
+  name: string;
+}
 
 const nodeTypes = { forge: FlowNode };
 
@@ -57,6 +66,50 @@ function EditorInner() {
   const unsub = useRef<(() => void) | null>(null);
   const specMap = useMemo(() => Object.fromEntries(specs.map((s) => [s.type, s])), [specs]);
 
+  // ---- undo / redo ----
+  // Refs let history callbacks read the latest values without re-creating every handler.
+  const statesRef = useRef(states);
+  const runRef = useRef(run);
+  const nameRef = useRef(name);
+  statesRef.current = states;
+  runRef.current = run;
+  nameRef.current = name;
+  const history = useHistory<Snapshot>(50);
+  const dragStart = useRef<Snapshot | null>(null);
+  const resizing = useRef(false);
+
+  /** The whole editable state: graph, node results and the run they came from. */
+  const snapshot = (): Snapshot => ({
+    nodes: flow.getNodes().map((n) => ({
+      id: n.id, type: n.type, position: { ...n.position }, width: n.width, height: n.height,
+      data: { def: n.data.def, spec: n.data.spec },
+    })) as ForgeNode[],
+    edges: flow.getEdges().map((e) => ({ id: e.id, source: e.source, sourceHandle: e.sourceHandle, target: e.target, targetHandle: e.targetHandle })),
+    states: statesRef.current,
+    run: runRef.current,
+    name: nameRef.current,
+  });
+
+  const record = (key?: string, windowMs?: number) => history.record(snapshot(), key, windowMs);
+
+  const restore = (s: Snapshot) => {
+    // Results come from the snapshot, so stop live updates of the run being left…
+    unsub.current?.();
+    unsub.current = null;
+    setNodes(s.nodes.map((n) => ({ ...n, data: { ...n.data, state: s.states[n.id] } })));
+    setEdges(s.edges);
+    setStates(s.states);
+    setRun(s.run);
+    setName(s.name);
+    setSelectedId((cur) => (cur && s.nodes.some((n) => n.id === cur) ? cur : null));
+    setDirty(true);
+    // …and pick them up again when the restored run is still going.
+    if (s.run && (s.run.status === "running" || s.run.status === "queued")) attachRun(s.run.id);
+  };
+
+  const undo = () => { const s = history.undo(snapshot()); if (s) restore(s); };
+  const redo = () => { const s = history.redo(snapshot()); if (s) restore(s); };
+
   // ---- load ----
   useEffect(() => {
     Promise.all([api.nodes(), api.workflow(id), api.providers(), api.mcpServers(), api.runs(id, 1)])
@@ -98,6 +151,27 @@ function EditorInner() {
       return e.animated === animated ? e : { ...e, animated };
     }));
   }, [states, setNodes, setEdges]);
+
+  // A preview fed by "image" while "images[]" of the same node holds more gets a hint with a one-click fix.
+  useEffect(() => {
+    const count = (v: unknown): number => (Array.isArray(v) ? v.reduce((n: number, x) => n + count(x), 0) : v == null ? 0 : 1);
+    setNodes((ns) => {
+      const byId = Object.fromEntries(ns.map((n) => [n.id, n]));
+      return ns.map((n) => {
+        if (n.data.def.type !== "output.preview") return n;
+        let hint: PreviewHint | undefined;
+        for (const e of edges.filter((x) => x.target === n.id)) {
+          const list = byId[e.source]?.data.spec?.outputs.find((p) => p.list && p.name === `${e.sourceHandle}s`);
+          const out = states[e.source]?.outputs;
+          if (!list || !out) continue;
+          const alreadyAll = edges.some((x) => x.target === n.id && x.source === e.source && x.sourceHandle === list.name);
+          const shown = count(out[e.sourceHandle ?? ""]), total = count(out[list.name]);
+          if (!alreadyAll && total > shown) { hint = { source: e.source, from: e.sourceHandle ?? "", to: list.name, shown, total }; break; }
+        }
+        return JSON.stringify(hint) === JSON.stringify(n.data.hint) ? n : { ...n, data: { ...n.data, hint } };
+      });
+    });
+  }, [states, edges, setNodes]);
 
   const attachRun = useCallback((runId: string) => {
     unsub.current?.();
@@ -150,6 +224,7 @@ function EditorInner() {
   const onConnect = useCallback((c: Connection) => {
     const dst = flow.getNode(c.target) as ForgeNode | undefined;
     const port = dst?.data.spec?.inputs.find((p) => p.name === c.targetHandle);
+    record();
     setEdges((es) => {
       // A single-value input holds one connection; list inputs collect many.
       const kept = port?.list ? es : es.filter((e) => !(e.target === c.target && e.targetHandle === c.targetHandle));
@@ -162,6 +237,7 @@ function EditorInner() {
     const pos = position ?? flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
     // Node data keeps the original spec (localized at render); the title is set in the current language.
     const def: NodeDef = { id: newId(spec.type), type: spec.type, title: localize(spec).title, params: {} };
+    record();
     setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), { id: def.id, type: "forge", position: pos, data: { def, spec }, selected: true, ...sizeFor(def) }]);
     setSelectedId(def.id);
     setTab("params");
@@ -174,15 +250,17 @@ function EditorInner() {
     if (specMap[type]) addNode(specMap[type], flow.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
   };
 
-  const updateDef = (nodeId: string, patch: (d: NodeDef) => NodeDef) => {
+  /** `field` groups rapid edits of one field (typing) into a single undo step. */
+  const updateDef = (nodeId: string, field: string, patch: (d: NodeDef) => NodeDef) => {
+    record(`def:${nodeId}:${field}`);
     setNodes((ns) => ns.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, def: patch(n.data.def) } } : n)));
     markDirty();
   };
 
   // ---- save & run ----
-  const save = useCallback(async () => {
+  const save = useCallback(async (graph?: Graph) => {
     try {
-      await api.saveWorkflow(id, { name, graph: toGraph() });
+      await api.saveWorkflow(id, { name, graph: graph ?? toGraph() });
       setDirty(false);
       return true;
     } catch (e) {
@@ -193,16 +271,24 @@ function EditorInner() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); void save().then((ok) => ok && toast(t("common.saved"))); }
+      if (!(e.ctrlKey || e.metaKey)) return;
+      // e.code, not e.key: shortcuts must work on any keyboard layout (Russian Ctrl+Я is still KeyZ).
+      if (e.code === "KeyS") { e.preventDefault(); void save().then((ok) => ok && toast(t("common.saved"))); return; }
+      const target = e.target as HTMLElement | null;
+      const editingText = !!target && (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable);
+      if (editingText) return; // keep the browser's own text undo inside fields
+      if (e.code === "KeyZ") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+      else if (e.code === "KeyY") { e.preventDefault(); redo(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [save, t]);
+  });
 
   const startRun = async (inputs: Record<string, unknown>) => {
     if (!(await save())) return;
     try {
       const r = await api.runWorkflow(id, inputs);
+      record(); // previous results become one undo step
       setStates({});
       setShowRun(false);
       attachRun(r.id);
@@ -210,15 +296,33 @@ function EditorInner() {
     } catch (e) { toastError(e); }
   };
 
-  const rerunFrom = async (nodeId: string) => {
+  /** Saves, then reruns with the current graph: unchanged nodes upstream are reused from the last run. */
+  const rerunFrom = async (nodeId: string, graph: Graph = toGraph(), recordStep = true) => {
     if (!run) return;
-    if (dirty && !confirm(t("editor.confirmRerunDirty"))) return;
+    if (!(await save(graph))) return;
     try {
-      const r = await api.rerun(run.id, nodeId);
+      const r = await api.rerun(run.id, nodeId, graph);
+      if (recordStep) record();
       attachRun(r.id);
       toast(t("editor.rerunning", { id: nodeId }));
     } catch (e) { toastError(e); }
   };
+
+  /** Rewires a preview from e.g. "image" to "images" and recomputes just the preview (nothing is regenerated). */
+  const showAll = (previewId: string, hint: PreviewHint) => {
+    record();
+    const edge: Edge = { id: `e_${hint.source}_${hint.to}_${previewId}_value`, source: hint.source, sourceHandle: hint.to, target: previewId, targetHandle: "value" };
+    const keep = (e: Edge) => !(e.target === previewId && e.source === hint.source && e.sourceHandle === hint.from);
+    setEdges((es) => [...es.filter(keep), edge]);
+    markDirty();
+    const g = toGraph();
+    void rerunFrom(previewId, {
+      ...g,
+      edges: [...g.edges.filter((e) => !(e.target === previewId && e.source === hint.source && e.sourcePort === hint.from)),
+        { id: edge.id, source: hint.source, sourcePort: hint.to, target: previewId, targetPort: "value" }],
+    }, false); // the rewire above is already the one undo step
+  };
+  const actions = { showAll };
 
   const selected = nodes.find((n) => n.id === selectedId);
   const selectedSpec = selected?.data.spec && localize(selected.data.spec);
@@ -239,7 +343,9 @@ function EditorInner() {
     <div className="editor">
       <div className="editor-top">
         <button className="ghost" onClick={() => navigate("/")}>←</button>
-        <input className="title" value={name} onChange={(e) => { setName(e.target.value); markDirty(); }} />
+        <input className="title" value={name} onChange={(e) => { record("name"); setName(e.target.value); markDirty(); }} />
+        <button className="ghost" disabled={!history.canUndo} onClick={undo} title={t("editor.undo")}>↶</button>
+        <button className="ghost" disabled={!history.canRedo} onClick={redo} title={t("editor.redo")}>↷</button>
         {dirty && <span className="help">{t("editor.unsaved")}</span>}
         <span className="spacer" />
         {run && (
@@ -273,12 +379,31 @@ function EditorInner() {
       </div>
 
       <div className="canvas" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+        <EditorActions.Provider value={actions}>
         <ReactFlow<ForgeNode, Edge>
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
-          onNodesChange={(c) => { onNodesChange(c); if (c.some((x) => x.type === "remove" || (x.type === "position" && !x.dragging) || (x.type === "dimensions" && x.resizing === false))) markDirty(); }}
-          onEdgesChange={(c) => { onEdgesChange(c); if (c.some((x) => x.type === "remove")) markDirty(); }}
+          onNodesChange={(c) => {
+            // Delete key removes nodes and their edges in two calls; a short merge window makes it one step.
+            if (c.some((x) => x.type === "remove")) record("remove", 300);
+            if (!resizing.current && c.some((x) => x.type === "dimensions" && x.resizing === true)) { resizing.current = true; record(); }
+            if (c.some((x) => x.type === "dimensions" && x.resizing === false)) resizing.current = false;
+            onNodesChange(c);
+            if (c.some((x) => x.type === "remove" || (x.type === "position" && !x.dragging) || (x.type === "dimensions" && x.resizing === false))) markDirty();
+          }}
+          onEdgesChange={(c) => { if (c.some((x) => x.type === "remove")) record("remove", 300); onEdgesChange(c); if (c.some((x) => x.type === "remove")) markDirty(); }}
+          onNodeDragStart={() => { dragStart.current = snapshot(); }}
+          onNodeDragStop={() => {
+            // Only a real move becomes an undo step, not a click that started a drag.
+            const before = dragStart.current;
+            dragStart.current = null;
+            const moved = before && flow.getNodes().some((n) => {
+              const b = before.nodes.find((x) => x.id === n.id);
+              return b && (b.position.x !== n.position.x || b.position.y !== n.position.y);
+            });
+            if (before && moved) history.record(before);
+          }}
           onConnect={onConnect}
           isValidConnection={isValidConnection}
           onSelectionChange={({ nodes: sel }) => setSelectedId(sel[0]?.id ?? null)}
@@ -292,6 +417,7 @@ function EditorInner() {
           <Controls />
           <MiniMap pannable zoomable nodeColor={(n) => (n as ForgeNode).data.spec?.color ?? "#555"} />
         </ReactFlow>
+        </EditorActions.Provider>
       </div>
 
       <div className="inspector">
@@ -329,22 +455,22 @@ function EditorInner() {
             {tab === "params" && (
               <div>
                 <Field label={t("editor.title")}>
-                  <input value={selected.data.def.title ?? ""} onChange={(e) => updateDef(selected.id, (d) => ({ ...d, title: e.target.value }))} />
+                  <input value={selected.data.def.title ?? ""} onChange={(e) => updateDef(selected.id, "title", (d) => ({ ...d, title: e.target.value }))} />
                 </Field>
                 {selectedSpec.params.map((p) => (
                   <ParamField key={p.name} spec={p} value={selected.data.def.params[p.name]} providers={providers} mcpServers={mcpServers}
-                    onChange={(v) => updateDef(selected.id, (d) => ({ ...d, params: { ...d.params, [p.name]: v } }))} />
+                    onChange={(v) => updateDef(selected.id, `param:${p.name}`, (d) => ({ ...d, params: { ...d.params, [p.name]: v } }))} />
                 ))}
                 <details>
                   <summary className="help" style={{ cursor: "pointer", marginBottom: 10 }}>{t("editor.execution")}</summary>
                   <div className="row">
                     <Field label={t("editor.retries")}><input type="number" min={0} value={selected.data.def.retries ?? 0}
-                      onChange={(e) => updateDef(selected.id, (d) => ({ ...d, retries: Number(e.target.value) }))} /></Field>
+                      onChange={(e) => updateDef(selected.id, "retries", (d) => ({ ...d, retries: Number(e.target.value) }))} /></Field>
                     <Field label={t("editor.parallel")}><input type="number" min={1} value={selected.data.def.mapConcurrency ?? 2}
-                      onChange={(e) => updateDef(selected.id, (d) => ({ ...d, mapConcurrency: Number(e.target.value) }))} /></Field>
+                      onChange={(e) => updateDef(selected.id, "mapConcurrency", (d) => ({ ...d, mapConcurrency: Number(e.target.value) }))} /></Field>
                   </div>
                   <label className="row" style={{ marginBottom: 12 }}>
-                    <input type="checkbox" checked={!!selected.data.def.disabled} onChange={(e) => updateDef(selected.id, (d) => ({ ...d, disabled: e.target.checked }))} />
+                    <input type="checkbox" checked={!!selected.data.def.disabled} onChange={(e) => updateDef(selected.id, "disabled", (d) => ({ ...d, disabled: e.target.checked }))} />
                     <span>{t("editor.bypass")}</span>
                   </label>
                 </details>

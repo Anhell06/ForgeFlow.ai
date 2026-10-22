@@ -4,6 +4,12 @@
 type ParamText = { label?: string; help?: string };
 type NodeText = { title: string; description: string; params?: Record<string, ParamText> };
 
+/** Display labels/help of ports (the port names themselves stay, templates use them). */
+export const portTextRu: Record<string, ParamText> = {
+  "image (1st)": { label: "image (1-я)", help: "Только первое изображение" },
+  "images (all)": { label: "images (все)", help: "Все изображения" },
+};
+
 export const categoryRu: Record<string, string> = {
   Input: "Ввод",
   Output: "Вывод",

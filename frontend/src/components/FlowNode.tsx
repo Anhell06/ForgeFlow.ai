@@ -1,11 +1,16 @@
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from "@xyflow/react";
 import { isAsset, kindColor, type Asset, type NodeDef, type NodeSpec, type NodeState } from "../api";
 import { CanvasPreview, fileUrl, ValueView } from "./Preview";
 import { Modal } from "./ui";
 import { useI18n, type MsgKey } from "../i18n";
 
-export type ForgeNodeData = { def: NodeDef; spec?: NodeSpec; state?: NodeState };
+/** Set on a preview fed by a single-value port (e.g. image) when the sibling list port (images) holds more. */
+export type PreviewHint = { source: string; from: string; to: string; shown: number; total: number };
+export type ForgeNodeData = { def: NodeDef; spec?: NodeSpec; state?: NodeState; hint?: PreviewHint };
+
+/** Editor actions nodes can trigger without threading callbacks through node data. */
+export const EditorActions = createContext<{ showAll?: (previewId: string, hint: PreviewHint) => void }>({});
 export type ForgeNode = Node<ForgeNodeData, "forge">;
 
 function firstAsset(outputs: Record<string, unknown> | undefined): Asset | undefined {
@@ -24,7 +29,8 @@ function firstAsset(outputs: Record<string, unknown> | undefined): Asset | undef
 function PreviewNode({ data, selected }: NodeProps<ForgeNode>) {
   const { t, spec: localize } = useI18n();
   const [full, setFull] = useState(false);
-  const { def, state } = data;
+  const actions = useContext(EditorActions);
+  const { def, state, hint } = data;
   const spec = data.spec && localize(data.spec);
   const value = state?.outputs?.value;
   const has = value !== null && value !== undefined && !(Array.isArray(value) && value.length === 0);
@@ -48,6 +54,12 @@ function PreviewNode({ data, selected }: NodeProps<ForgeNode>) {
         <div className="port" style={{ position: "absolute", top: 46, right: 0, height: 0 }}>
           <Handle type="source" position={Position.Right} id="value" style={{ background: kindColor.any }} />
         </div>
+        {hint && (
+          <div className="cp-hint">
+            <span className="grow">{t("preview.partial", { shown: hint.shown, total: hint.total, port: hint.to })}</span>
+            {actions.showAll && <button className="small nodrag" onClick={() => actions.showAll!(def.id, hint)}>{t("preview.showAll")}</button>}
+          </div>
+        )}
         <div className="cp-area">
           {has ? <CanvasPreview value={value} /> : (
             <div className="cp-empty">{state?.error ? <span style={{ color: "var(--err)" }}>{state.error}</span> : t("preview.empty")}</div>

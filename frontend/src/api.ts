@@ -97,7 +97,8 @@ export const api = {
   runs: (workflowId?: string, limit = 50) => request<Run[]>("GET", `/api/runs?limit=${limit}${workflowId ? `&workflowId=${workflowId}` : ""}`),
   run: (id: string) => request<Run>("GET", `/api/runs/${id}`),
   cancelRun: (id: string) => request<void>("POST", `/api/runs/${id}/cancel`),
-  rerun: (id: string, fromNodeId?: string) => request<Run>("POST", `/api/runs/${id}/rerun`, { fromNodeId }),
+  /** With `graph`, the edited pipeline is used and only changed nodes (and what follows them) re-execute. */
+  rerun: (id: string, fromNodeId?: string, graph?: Graph) => request<Run>("POST", `/api/runs/${id}/rerun`, { fromNodeId, graph }),
   deleteRun: (id: string) => request<void>("DELETE", `/api/runs/${id}`),
 
   assets: (kind?: string, q?: string) => request<Asset[]>("GET", `/api/assets?limit=300${kind ? `&kind=${kind}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`),

@@ -77,13 +77,22 @@ app.UseStaticFiles(new StaticFileOptions
     RequestPath = "/files",
     ServeUnknownFileTypes = true,
 });
+// index.html must always be revalidated, otherwise browsers keep loading an old UI build after an update.
+// Hashed /assets/* files can be cached normally.
+var uiFiles = new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        if (ctx.File.Name == "index.html") ctx.Context.Response.Headers.CacheControl = "no-cache";
+    },
+};
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(uiFiles);
 
 app.MapOpenApi();
 app.MapForgeApi();
 app.MapForgeMcp();
-app.MapFallbackToFile("index.html");
+app.MapFallbackToFile("index.html", uiFiles);
 
 app.Run();
 
