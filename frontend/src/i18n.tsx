@@ -128,6 +128,10 @@ const en = {
   "assets.copyPathHint": "Copy local path",
   "kind.image": "images", "kind.video": "videos", "kind.model": "3D models", "kind.audio": "audio", "kind.json": "JSON", "kind.file": "files",
 
+  "preview.empty": "Run the pipeline — the result will appear here.",
+  "preview.expand": "Open full size",
+  "preview.download": "Download",
+
   "param.auto": "(auto: first available)",
   "param.noKey": "no key",
   "param.missing": "missing",
@@ -313,6 +317,10 @@ const ru: Record<MsgKey, string> = {
   "assets.path": "путь",
   "assets.copyPathHint": "Копировать локальный путь",
   "kind.image": "изображения", "kind.video": "видео", "kind.model": "3D-модели", "kind.audio": "аудио", "kind.json": "JSON", "kind.file": "файлы",
+
+  "preview.empty": "Запустите конвейер — результат появится здесь.",
+  "preview.expand": "Открыть во весь экран",
+  "preview.download": "Скачать",
 
   "param.auto": "(авто: первый доступный)",
   "param.noKey": "нет ключа",

@@ -9,7 +9,7 @@ declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
       "model-viewer": DetailedHTMLProps<HTMLAttributes<HTMLElement>, HTMLElement> & {
-        src?: string; "camera-controls"?: boolean; "auto-rotate"?: boolean; autoplay?: boolean; "shadow-intensity"?: string;
+        src?: string; class?: string; "camera-controls"?: boolean; "auto-rotate"?: boolean; autoplay?: boolean; "shadow-intensity"?: string;
         exposure?: string; "environment-image"?: string; poster?: string; ar?: boolean;
       };
     }
@@ -53,6 +53,57 @@ export function AssetThumb({ asset }: { asset: Asset }) {
   if (asset.kind === "video") return <video src={url} muted loop playsInline onMouseEnter={(e) => void e.currentTarget.play()} onMouseLeave={(e) => e.currentTarget.pause()} />;
   if (viewable3d(asset)) return <model-viewer src={url} auto-rotate />;
   return <span>{{ model: "⬢", audio: "♪", text: "¶", json: "{}" }[asset.kind] ?? "▤"}</span>;
+}
+
+/** Flattens nested lists so a gallery can show every item. */
+function flatten(v: unknown): unknown[] {
+  return Array.isArray(v) ? v.flatMap(flatten) : [v];
+}
+
+/**
+ * Compact viewer that fills a canvas node: one asset fills the area, several images form a grid,
+ * text and JSON scroll. Interactive parts carry nodrag/nowheel so React Flow leaves them alone.
+ */
+export function CanvasPreview({ value }: { value: unknown }) {
+  const items = flatten(value).filter((v) => v !== null && v !== undefined);
+  if (items.length === 0) return null;
+
+  const assets = items.filter(isAsset) as Asset[];
+  const others = items.filter((v) => !isAsset(v));
+
+  if (assets.length === 1 && others.length === 0) {
+    const a = assets[0];
+    const url = fileUrl(a);
+    if (a.kind === "image") return <img className="cp-fill" src={url} alt={a.name} />;
+    if (a.kind === "video") return <video className="cp-fill nodrag" src={url} controls loop muted autoPlay playsInline />;
+    if (a.kind === "audio") return <div className="cp-center nodrag"><audio src={url} controls style={{ width: "100%" }} /></div>;
+    if (viewable3d(a)) return <model-viewer class="cp-fill nodrag nowheel" src={url} camera-controls auto-rotate autoplay shadow-intensity="1" exposure="1.1" />;
+    return <div className="cp-center"><a className="btn nodrag" href={url} download={a.name}>↓ {a.name}</a></div>;
+  }
+
+  if (others.length === 0 && assets.every((a) => a.kind === "image")) {
+    const cols = Math.ceil(Math.sqrt(assets.length));
+    return (
+      <div className="cp-grid nowheel" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+        {assets.map((a) => <img key={a.$asset} src={fileUrl(a)} alt={a.name} title={a.name} />)}
+      </div>
+    );
+  }
+
+  if (assets.length === 0 && items.length === 1 && typeof items[0] !== "object") {
+    return <pre className="cp-text nodrag nowheel">{String(items[0])}</pre>;
+  }
+
+  // Mixed content: stack everything and scroll.
+  return (
+    <div className="cp-stack nodrag nowheel">
+      {items.map((v, i) => (
+        <div key={i}>
+          {isAsset(v) ? <AssetView asset={v} compact /> : <pre>{typeof v === "string" ? v : JSON.stringify(v, null, 2)}</pre>}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /** Renders any node output value: assets, lists of assets, text or JSON. */

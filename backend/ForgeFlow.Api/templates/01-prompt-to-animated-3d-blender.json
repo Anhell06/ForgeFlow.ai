@@ -28,9 +28,9 @@
           "provider": "Local LLM (Ollama)", "model": "", "mcpServers": ["Blender MCP"], "maxSteps": 60, "timeoutMin": 45,
           "prompt": "In Blender (via your tools):\n1. Clear the default scene, then import the 3D model from the input model path.\n2. Scale it to about 1.8 m tall, standing on the ground, facing -Y.\n3. Add a humanoid armature (Rigify basic human or a simple custom skeleton), fit it to the mesh and bind with automatic weights.\n4. Study the reference frames (input files) of this motion: \"{{workflow.animation}}\". Create a looping 2-second action that reproduces it with keyframes on the bones.\n5. Take a viewport screenshot to check the pose.\n6. Export the result as animated GLB (include the armature and animation) into the output folder, and also save the .blend there.\nUse Python code execution in Blender when a dedicated tool is missing."
         } },
-      { "id": "result", "type": "output.result", "title": "Animated model", "position": { "x": 1780, "y": 120 },
+      { "id": "result", "type": "output.preview", "title": "Animated model", "position": { "x": 1780, "y": 120 },
         "params": { "name": "animated_model" } },
-      { "id": "concept_out", "type": "output.result", "title": "Concept", "position": { "x": 1060, "y": -100 },
+      { "id": "concept_out", "type": "output.preview", "title": "Concept", "position": { "x": 1060, "y": -300 },
         "params": { "name": "concept" } }
     ],
     "edges": [

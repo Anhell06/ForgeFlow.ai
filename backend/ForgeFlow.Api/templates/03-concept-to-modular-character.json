@@ -27,8 +27,8 @@
           "provider": "Local LLM (Ollama)", "mcpServers": ["Blender MCP"], "maxSteps": 80, "timeoutMin": 60,
           "prompt": "Assemble a modular character in Blender from the part meshes in the input files. The part list is in the context (same order as the files). Import every file, name each object after its part, scale and position the parts so they fit together on one ~1.8 m character like in the concept image (input image). Keep parts as separate objects in a collection 'Character'. Screenshot the viewport to verify, then export one GLB with all parts and also the .blend into the output folder."
         } },
-      { "id": "result", "type": "output.result", "title": "Assembled character", "position": { "x": 1780, "y": 140 }, "params": { "name": "character" } },
-      { "id": "parts_out", "type": "output.result", "title": "Part meshes", "position": { "x": 1420, "y": 380 }, "params": { "name": "part_meshes" } }
+      { "id": "result", "type": "output.preview", "title": "Assembled character", "position": { "x": 1780, "y": 140 }, "params": { "name": "character" } },
+      { "id": "parts_out", "type": "output.preview", "title": "Part meshes", "position": { "x": 1420, "y": 500 }, "params": { "name": "part_meshes" } }
     ],
     "edges": [
       { "id": "e1", "source": "concept", "sourcePort": "file", "target": "parts", "targetPort": "images" },

@@ -110,6 +110,12 @@ public class ApiTests(ForgeFactory factory)
         Assert.Equal("succeeded", run!["status"]!.GetValue<string>());
         Assert.Equal("mock: hi", run["nodes"]!["node"]!["outputs"]!["out"]!.GetValue<string>());
 
+        // Preview collects into a list port and unwraps a single value.
+        var preview = await (await _http.PostAsJsonAsync("/api/nodes/output.preview/run", new { inputs = new { value = "final text" }, wait = true }))
+            .Content.ReadFromJsonAsync<JsonObject>();
+        Assert.Equal("succeeded", preview!["status"]!.GetValue<string>());
+        Assert.Equal("final text", preview["nodes"]!["node"]!["outputs"]!["value"]!.GetValue<string>());
+
         // Our own MCP client against our own MCP endpoint.
         var cfg = new McpServerEntity { Name = "self", Transport = "http", Url = new Uri(_http.BaseAddress!, "/mcp").ToString() };
         await using var mcp = await McpClient.ConnectAsync(cfg, _ => { }, CancellationToken.None, _http);

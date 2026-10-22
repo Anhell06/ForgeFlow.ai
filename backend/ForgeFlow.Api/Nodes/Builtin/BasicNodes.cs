@@ -129,6 +129,28 @@ public class ResultNode : NodeBase
         Task.FromResult(Out(("value", ctx.Input("value")?.DeepClone())));
 }
 
+/// <summary>
+/// Shows whatever reaches it on the canvas. The input is a list port so several connections (or a fanned-out
+/// node) collect into one gallery instead of fanning the preview out.
+/// </summary>
+public class PreviewNode : NodeBase
+{
+    public override NodeSpec Spec { get; } = new("output.preview", "Preview", "Output",
+        "Shows the result right on the canvas: images, video, 3D models, audio, text, JSON or lists of them. " +
+        "Connect several outputs to compare them. Also listed in the run results.",
+        [new("value", Kinds.Any, List: true)],
+        [new("value", Kinds.Any)],
+        [new("name", "string", "Result name", JsonValue.Create(""), Help: "Empty = the node title")], "#10b981");
+
+    public override Task<Dictionary<string, JsonNode?>> ExecuteAsync(NodeContext ctx)
+    {
+        var value = ctx.Input("value");
+        // A single item is shown (and returned) as itself, not as a one-element list.
+        if (value is JsonArray { Count: 1 } one) value = one[0];
+        return Task.FromResult(Out(("value", value?.DeepClone())));
+    }
+}
+
 /// <summary>Produces placeholder files so pipelines can be tested without API keys or GPUs.</summary>
 public class MockNode : NodeBase
 {

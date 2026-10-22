@@ -21,7 +21,7 @@ public class NodeRegistry
         Directory.CreateDirectory(_customDir);
         INodeType[] builtins =
         [
-            new TextInputNode(), new AssetInputNode(), new TextTemplateNode(), new TextSplitNode(), new ResultNode(), new MockNode(),
+            new TextInputNode(), new AssetInputNode(), new TextTemplateNode(), new TextSplitNode(), new ResultNode(), new PreviewNode(), new MockNode(),
             new LlmChatNode(),
             new ImageGenerateNode(), new VideoGenerateNode(), new Model3dGenerateNode(), new TripoTaskNode(), new VideoFramesNode(),
             new ImageCollageNode(), new ImageSliceNode(), new ImageRemoveBackgroundNode(),

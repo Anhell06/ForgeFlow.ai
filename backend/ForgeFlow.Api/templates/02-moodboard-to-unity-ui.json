@@ -33,9 +33,9 @@
           "collect": "Assets/UI/Generated/**/*\nAssets/Scenes/GeneratedUIDemo.unity",
           "prompt": "You are working in a Unity project. Integrate a generated UI kit:\n1. Copy every slice image listed in the context into Assets/UI/Generated/Sprites/ (keep file names). Copy the moodboard image to Assets/UI/Generated/moodboard.png.\n2. For each sprite create/modify its .meta so the importer uses Texture Type: Sprite (2D and UI), Sprite Mode: Single, Mesh Type: Full Rect, alphaIsTransparency: 1, and set spriteBorder (x=left, y=bottom, z=right, w=top) from the slice data below. Skip borders when 'stretchable' is false.\n3. Create prefabs in Assets/UI/Generated/Prefabs/: one UI Image prefab per element with Image Type = Sliced for stretchable sprites, Simple otherwise. Name them by what they look like (Button_Normal, Panel_Large, ...) — look at the images.\n4. Create Assets/Scenes/GeneratedUIDemo.unity with a Canvas (Scale With Screen Size 1920x1080) that lays the prefabs out as a sample menu matching the moodboard mood.\n5. If Unity is open with an MCP bridge, refresh assets; otherwise it is fine to only write files. Summarize what you created.\n\nSlice data (JSON):\n{{inputs.context | json}}"
         } },
-      { "id": "board_out", "type": "output.result", "title": "Moodboard", "position": { "x": 1420, "y": -40 }, "params": { "name": "moodboard" } },
-      { "id": "slices_out", "type": "output.result", "title": "UI elements", "position": { "x": 1420, "y": 480 }, "params": { "name": "ui_elements" } },
-      { "id": "unity_out", "type": "output.result", "title": "Unity report", "position": { "x": 1780, "y": 200 }, "params": { "name": "unity_report" } }
+      { "id": "board_out", "type": "output.preview", "title": "Moodboard", "position": { "x": 1420, "y": -340 }, "params": { "name": "moodboard" } },
+      { "id": "slices_out", "type": "output.preview", "title": "UI elements", "position": { "x": 1420, "y": 580 }, "params": { "name": "ui_elements" } },
+      { "id": "unity_out", "type": "output.preview", "title": "Unity report", "position": { "x": 1780, "y": 200 }, "params": { "name": "unity_report" } }
     ],
     "edges": [
       { "id": "e1", "source": "prompt", "sourcePort": "text", "target": "shots", "targetPort": "prompt" },

@@ -13,7 +13,7 @@ export interface NodeSpec {
 
 export interface NodeDef {
   id: string; type: string; title?: string; params: Record<string, unknown>;
-  position?: { x: number; y: number }; retries?: number; mapConcurrency?: number; disabled?: boolean;
+  position?: { x: number; y: number }; width?: number; height?: number; retries?: number; mapConcurrency?: number; disabled?: boolean;
 }
 export interface EdgeDef { id: string; source: string; sourcePort: string; target: string; targetPort: string }
 export interface Graph { nodes: NodeDef[]; edges: EdgeDef[] }

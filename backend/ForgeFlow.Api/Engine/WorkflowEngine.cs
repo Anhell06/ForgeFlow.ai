@@ -309,7 +309,7 @@ public class WorkflowEngine(
     JsonObject CollectOutputs(RunCtx rc)
     {
         var outputs = new JsonObject();
-        var resultNodes = rc.Graph.Nodes.Where(n => n.Type == "output.result").ToList();
+        var resultNodes = rc.Graph.Nodes.Where(n => n.Type is "output.result" or "output.preview").ToList();
         if (resultNodes.Count > 0)
         {
             foreach (var n in resultNodes)

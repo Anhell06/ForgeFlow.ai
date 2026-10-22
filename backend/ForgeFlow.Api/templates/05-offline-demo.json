@@ -16,9 +16,9 @@
         "params": { "mode": "auto", "tolerance": 20, "minSize": 32 } },
       { "id": "mesh", "type": "debug.mock", "title": "Fake 3D model", "position": { "x": 960, "y": 260 },
         "params": { "kind": "model", "delayMs": 800 } },
-      { "id": "r1", "type": "output.result", "title": "Collage", "position": { "x": 1280, "y": -120 }, "params": { "name": "collage" } },
-      { "id": "r2", "type": "output.result", "title": "Slices", "position": { "x": 1600, "y": 40 }, "params": { "name": "slices" } },
-      { "id": "r3", "type": "output.result", "title": "Model", "position": { "x": 1280, "y": 260 }, "params": { "name": "model" } }
+      { "id": "r1", "type": "output.preview", "title": "Collage", "position": { "x": 1640, "y": -300 }, "params": { "name": "collage" } },
+      { "id": "r2", "type": "output.preview", "title": "Slices", "position": { "x": 1640, "y": 40 }, "params": { "name": "slices" } },
+      { "id": "r3", "type": "output.preview", "title": "Model", "position": { "x": 1280, "y": 260 }, "params": { "name": "model" } }
     ],
     "edges": [
       { "id": "e1", "source": "prompt", "sourcePort": "text", "target": "split", "targetPort": "text" },
@@ -27,7 +27,7 @@
       { "id": "e4", "source": "board", "sourcePort": "image", "target": "slice", "targetPort": "image" },
       { "id": "e5", "source": "prompt", "sourcePort": "text", "target": "mesh", "targetPort": "in" },
       { "id": "e6", "source": "board", "sourcePort": "image", "target": "r1", "targetPort": "value" },
-      { "id": "e7", "source": "slice", "sourcePort": "slices", "target": "r2", "targetPort": "value" },
+      { "id": "e7", "source": "slice", "sourcePort": "images", "target": "r2", "targetPort": "value" },
       { "id": "e8", "source": "mesh", "sourcePort": "out", "target": "r3", "targetPort": "value" }
     ]
   }

@@ -57,6 +57,9 @@ public class NodeDef
     public string? Title { get; set; }
     public JsonObject Params { get; set; } = new();
     public NodePosition? Position { get; set; }
+    /// <summary>Canvas size for resizable nodes (previews); null = automatic.</summary>
+    public double? Width { get; set; }
+    public double? Height { get; set; }
     /// <summary>Extra attempts after a failure.</summary>
     public int Retries { get; set; }
     /// <summary>How many list items run at once when the node fans out over a list.</summary>

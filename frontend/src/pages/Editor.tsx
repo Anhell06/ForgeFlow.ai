@@ -24,6 +24,14 @@ export default function Editor() {
   );
 }
 
+const resizable = (type: string) => type === "output.preview";
+
+/** Fixed canvas size for resizable nodes; other nodes size to their content. */
+function sizeFor(def: NodeDef): { width?: number; height?: number } {
+  if (!resizable(def.type)) return {};
+  return { width: def.width ?? 340, height: def.height ?? 300 };
+}
+
 function newId(type: string) {
   return `${type.split(".").pop()}_${Math.random().toString(36).slice(2, 6)}`;
 }
@@ -62,6 +70,7 @@ function EditorInner() {
         setNodes(g.nodes.map((n, i) => ({
           id: n.id, type: "forge", position: n.position ?? { x: 80 + i * 300, y: 120 },
           data: { def: { ...n, params: n.params ?? {} }, spec: map[n.type] },
+          ...sizeFor(n),
         })));
         setEdges(g.edges.map((e) => ({ id: e.id, source: e.source, sourceHandle: e.sourcePort, target: e.target, targetHandle: e.targetPort })));
         if (runs[0]) attachRun(runs[0].id);
@@ -121,7 +130,11 @@ function EditorInner() {
   // ---- graph editing ----
   const markDirty = () => setDirty(true);
   const toGraph = useCallback((): Graph => ({
-    nodes: flow.getNodes().map((n) => ({ ...(n.data as ForgeNode["data"]).def, position: { x: Math.round(n.position.x), y: Math.round(n.position.y) } })),
+    nodes: flow.getNodes().map((n) => {
+      const def = (n.data as ForgeNode["data"]).def;
+      const size = resizable(def.type) ? { width: Math.round(n.width ?? n.measured?.width ?? 340), height: Math.round(n.height ?? n.measured?.height ?? 300) } : {};
+      return { ...def, ...size, position: { x: Math.round(n.position.x), y: Math.round(n.position.y) } };
+    }),
     edges: flow.getEdges().map((e) => ({ id: e.id, source: e.source, sourcePort: e.sourceHandle ?? "", target: e.target, targetPort: e.targetHandle ?? "" })),
   }), [flow]);
 
@@ -149,7 +162,7 @@ function EditorInner() {
     const pos = position ?? flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
     // Node data keeps the original spec (localized at render); the title is set in the current language.
     const def: NodeDef = { id: newId(spec.type), type: spec.type, title: localize(spec).title, params: {} };
-    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), { id: def.id, type: "forge", position: pos, data: { def, spec }, selected: true }]);
+    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), { id: def.id, type: "forge", position: pos, data: { def, spec }, selected: true, ...sizeFor(def) }]);
     setSelectedId(def.id);
     setTab("params");
     markDirty();
@@ -264,7 +277,7 @@ function EditorInner() {
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
-          onNodesChange={(c) => { onNodesChange(c); if (c.some((x) => x.type === "remove" || (x.type === "position" && !x.dragging))) markDirty(); }}
+          onNodesChange={(c) => { onNodesChange(c); if (c.some((x) => x.type === "remove" || (x.type === "position" && !x.dragging) || (x.type === "dimensions" && x.resizing === false))) markDirty(); }}
           onEdgesChange={(c) => { onEdgesChange(c); if (c.some((x) => x.type === "remove")) markDirty(); }}
           onConnect={onConnect}
           isValidConnection={isValidConnection}

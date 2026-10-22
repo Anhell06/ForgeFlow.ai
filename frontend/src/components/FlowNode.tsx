@@ -1,6 +1,8 @@
-import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
+import { useState } from "react";
+import { Handle, NodeResizer, Position, type Node, type NodeProps } from "@xyflow/react";
 import { isAsset, kindColor, type Asset, type NodeDef, type NodeSpec, type NodeState } from "../api";
-import { fileUrl } from "./Preview";
+import { CanvasPreview, fileUrl, ValueView } from "./Preview";
+import { Modal } from "./ui";
 import { useI18n, type MsgKey } from "../i18n";
 
 export type ForgeNodeData = { def: NodeDef; spec?: NodeSpec; state?: NodeState };
@@ -18,7 +20,55 @@ function firstAsset(outputs: Record<string, unknown> | undefined): Asset | undef
   return undefined;
 }
 
-export function FlowNode({ data, selected }: NodeProps<ForgeNode>) {
+/** Preview node: a resizable viewer that fills with the incoming result. */
+function PreviewNode({ data, selected }: NodeProps<ForgeNode>) {
+  const { t, spec: localize } = useI18n();
+  const [full, setFull] = useState(false);
+  const { def, state } = data;
+  const spec = data.spec && localize(data.spec);
+  const value = state?.outputs?.value;
+  const has = value !== null && value !== undefined && !(Array.isArray(value) && value.length === 0);
+  const single = isAsset(value) ? value : undefined;
+  const status = state?.status;
+
+  return (
+    <>
+      <NodeResizer isVisible={!!selected} minWidth={220} minHeight={180} color="#7c5cff" />
+      <div className={`fnode fnode-preview${selected ? " selected" : ""}${status ? ` st-${status}` : ""}`}>
+        <div className="fnode-head" style={{ background: `linear-gradient(90deg, ${spec?.color ?? "#10b981"}33, transparent)` }}>
+          <span className="dot" style={{ background: spec?.color ?? "#10b981" }} />
+          <div className="fnode-title">{def.title || spec?.title}</div>
+          {status === "running" && <span className="badge s-running" style={{ padding: "1px 6px", fontSize: 10.5 }}>{t("status.running")}</span>}
+          {has && single && <a className="btn small nodrag" href={fileUrl(single)} download={single.name} title={t("preview.download")}>↓</a>}
+          {has && <button className="small nodrag" title={t("preview.expand")} onClick={() => setFull(true)}>⤢</button>}
+        </div>
+        <div className="port" style={{ position: "absolute", top: 46, left: 0, height: 0 }}>
+          <Handle type="target" position={Position.Left} id="value" style={{ background: kindColor.any, borderRadius: 2 }} />
+        </div>
+        <div className="port" style={{ position: "absolute", top: 46, right: 0, height: 0 }}>
+          <Handle type="source" position={Position.Right} id="value" style={{ background: kindColor.any }} />
+        </div>
+        <div className="cp-area">
+          {has ? <CanvasPreview value={value} /> : (
+            <div className="cp-empty">{state?.error ? <span style={{ color: "var(--err)" }}>{state.error}</span> : t("preview.empty")}</div>
+          )}
+        </div>
+      </div>
+      {full && (
+        <Modal title={def.title || spec?.title || ""} onClose={() => setFull(false)} wide>
+          <ValueView value={value} />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+export function FlowNode(props: NodeProps<ForgeNode>) {
+  if (props.data.def.type === "output.preview") return <PreviewNode {...props} />;
+  return <StandardNode {...props} />;
+}
+
+function StandardNode({ data, selected }: NodeProps<ForgeNode>) {
   const { t, spec: localize } = useI18n();
   const { def, state } = data;
   const spec = data.spec && localize(data.spec);

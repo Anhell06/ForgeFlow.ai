@@ -12,7 +12,7 @@
         "params": { "provider": "Tripo", "body": "{\"type\":\"animate_rig\",\"original_model_task_id\":\"{{inputs.meta.taskId}}\",\"out_format\":\"glb\"}" } },
       { "id": "walk", "type": "tripo.task", "title": "Retarget: walk", "position": { "x": 1060, "y": 100 },
         "params": { "provider": "Tripo", "body": "{\"type\":\"animate_retarget\",\"original_model_task_id\":\"{{inputs.meta.taskId}}\",\"animation\":\"preset:walk\",\"out_format\":\"glb\"}" } },
-      { "id": "result", "type": "output.result", "title": "Walking model", "position": { "x": 1420, "y": 100 }, "params": { "name": "model" } }
+      { "id": "result", "type": "output.preview", "title": "Walking model", "position": { "x": 1420, "y": 100 }, "params": { "name": "model" } }
     ],
     "edges": [
       { "id": "e1", "source": "image", "sourcePort": "file", "target": "mesh", "targetPort": "image" },
